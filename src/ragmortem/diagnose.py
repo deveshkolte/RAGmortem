@@ -20,6 +20,7 @@ from ragmortem.faults.eval import is_abstaining, is_answer_correct
 from ragmortem.faults.models import InjectedFaultCase
 from ragmortem.taxonomy import FailureType
 from ragmortem.types import Chunk, RagResult
+from ragmortem.support import evaluate_corpus_answerability, SupportClassification, CorpusSupportReport
 
 
 @dataclass
@@ -179,6 +180,7 @@ class EvidenceModel:
     ranking_strength: float = 0.0
     generation_support: float = 0.0
     answerability_signal: float = 0.0
+    corpus_support_strength: float = 0.0
     telemetry_completeness: TelemetryCompleteness = TelemetryCompleteness.COMPLETE
     ambiguity: float = 0.0
     reasons: list[str] = field(default_factory=list)
@@ -190,6 +192,7 @@ class EvidenceModel:
             "ranking_strength": round(self.ranking_strength, 4),
             "generation_support": round(self.generation_support, 4),
             "answerability_signal": round(self.answerability_signal, 4),
+            "corpus_support_strength": round(self.corpus_support_strength, 4),
             "telemetry_completeness": self.telemetry_completeness.value,
             "ambiguity": round(self.ambiguity, 4),
             "reasons": list(self.reasons),
@@ -506,8 +509,56 @@ class RAGDiagnoser:
                 signals=signals,
             )
 
-        # Check 3: High Relevance Context Probe (Generator Ignored Evidence)
+        # Check 3: High Relevance Context Probe (Generator Ignored Evidence vs Terminology Trap)
         if top_score > high_bound:
+            target_app = corpus if corpus is not None else self.app
+            if mode == "corpus_aware" and target_app is not None and hasattr(target_app, "retrieve"):
+                try:
+                    ret_chunks, ret_scores = target_app.retrieve(trace.question, k=3)
+                except Exception:
+                    ret_chunks, ret_scores = [], []
+                support_report = evaluate_corpus_answerability(trace.question, ret_chunks, ret_scores)
+                signals["corpus_support_strength"] = support_report.corpus_support_strength
+                signals["top_term_coverage"] = support_report.top_term_coverage
+                signals["is_terminology_trap"] = support_report.is_terminology_trap
+                signals["clean_corpus_score"] = support_report.top_score
+
+                if support_report.is_terminology_trap or support_report.classification == SupportClassification.UNSUPPORTED:
+                    evidence.append(
+                        f"Retrieved context had elevated vector similarity (top score: {top_score:.3f} > {high_bound}), "
+                        f"but support analysis confirms it is an unanswerable terminology trap lacking core entities."
+                    )
+                    evidence.extend(support_report.evidence_notes)
+                    reasons.append("Abstention failure: Query is unsupported; elevated similarity reflects domain background terminology.")
+                    return DiagnosticResult(
+                        diagnosis=FailureType.ABSTENTION_SUSPECTED,
+                        evidence_score=0.90,
+                        evidence=evidence,
+                        reasons=reasons,
+                        limitations=limitations,
+                        telemetry_completeness=completeness.value,
+                        mode=mode,
+                        is_suspected=True,
+                        signals=signals,
+                    )
+                elif support_report.classification == SupportClassification.AMBIGUOUS:
+                    evidence.append(
+                        f"Retrieved context had elevated similarity (top score: {top_score:.3f}), "
+                        f"but answerability support analysis indicates ambiguous evidence."
+                    )
+                    evidence.extend(support_report.evidence_notes)
+                    reasons.append("Ambiguous context: Related terminology present, but cannot verify whether context answers the question.")
+                    return DiagnosticResult(
+                        diagnosis=FailureType.UNKNOWN,
+                        evidence_score=0.0,
+                        evidence=evidence,
+                        reasons=reasons,
+                        limitations=limitations + support_report.limitations,
+                        telemetry_completeness=completeness.value,
+                        mode=mode,
+                        signals=signals,
+                    )
+
             evidence.append(
                 f"Retrieved context had high relevance score to question (top score: {top_score:.3f} > {high_bound})."
             )
@@ -576,24 +627,38 @@ class RAGDiagnoser:
         except Exception:
             ret_chunks, ret_scores = [], []
 
-        clean_top = float(ret_scores[0]) if ret_scores else 0.0
-        clean_gap = float(ret_scores[0] - ret_scores[2]) if len(ret_scores) >= 3 else 0.0
-        signals["clean_corpus_score"] = clean_top
-        signals["clean_corpus_gap"] = clean_gap
+        support_report = evaluate_corpus_answerability(
+            question=trace.question,
+            candidates=ret_chunks,
+            scores=ret_scores,
+        )
 
-        if clean_top >= 0.45 or (clean_top >= 0.28 and clean_gap >= 0.06):
+        signals["clean_corpus_score"] = support_report.top_score
+        signals["clean_corpus_gap"] = support_report.score_gap
+        signals["corpus_support_strength"] = support_report.corpus_support_strength
+        signals["top_term_coverage"] = support_report.top_term_coverage
+        signals["is_terminology_trap"] = support_report.is_terminology_trap
+
+        if support_report.classification == SupportClassification.SUPPORTED:
             evidence.append(
                 f"Retriever returned low-relevance chunks at runtime (top score: {top_score:.3f})."
             )
-            evidence.append(
-                f"Corpus audit shows indexed documents exist with distinct semantic relevance (clean score: {clean_top:.3f}, gap: {clean_gap:.3f})."
-            )
+            evidence.extend(support_report.evidence_notes)
             evidence.append("Root cause (suspected): Retriever failed to locate relevant documents present in the corpus.")
-            reasons.append("Retrieval miss: Relevant evidence exists in corpus but was omitted from retrieved context.")
-            ev_score = round(min(0.95, 0.75 + min(0.20, clean_gap)), 4)
+            reasons.extend(support_report.reasons)
+            ev_score = round(min(0.95, 0.75 + support_report.corpus_support_strength * 0.20), 4)
+            ev_model = EvidenceModel(
+                retrieval_strength=round(support_report.corpus_support_strength, 4),
+                corpus_support_strength=round(support_report.corpus_support_strength, 4),
+                answerability_signal=round(support_report.top_term_coverage, 4),
+                telemetry_completeness=completeness,
+                reasons=reasons,
+                limitations=limitations,
+            )
             return DiagnosticResult(
                 diagnosis=FailureType.RETRIEVAL_SUSPECTED,
                 evidence_score=ev_score,
+                evidence_model=ev_model,
                 evidence=evidence,
                 reasons=reasons,
                 limitations=limitations,
@@ -602,19 +667,25 @@ class RAGDiagnoser:
                 is_suspected=True,
                 signals=signals,
             )
-        elif clean_top < 0.42 and clean_gap < 0.05:
+        elif support_report.classification == SupportClassification.UNSUPPORTED:
             evidence.append(
-                f"Retriever returned low-relevance chunks (top score: {top_score:.3f})."
+                f"Retriever returned low-relevance chunks at runtime (top score: {top_score:.3f})."
             )
-            evidence.append(
-                f"Corpus audit confirms no documents in the index match the question (maximum score: {clean_top:.3f}, flat gap: {clean_gap:.3f})."
-            )
+            evidence.extend(support_report.evidence_notes)
             evidence.append("System produced a substantive answer when the corpus contains no supporting evidence.")
-            reasons.append("Abstention failure: Unanswerable query from corpus; system hallucinated when it should have abstained.")
-            ev_score = round(min(0.95, 0.75 + max(0.0, 0.42 - clean_top)), 4)
+            reasons.extend(support_report.reasons)
+            ev_score = round(min(0.95, 0.75 + (1.0 - support_report.corpus_support_strength) * 0.20), 4)
+            ev_model = EvidenceModel(
+                corpus_support_strength=round(support_report.corpus_support_strength, 4),
+                answerability_signal=round(support_report.top_term_coverage, 4),
+                telemetry_completeness=completeness,
+                reasons=reasons,
+                limitations=limitations,
+            )
             return DiagnosticResult(
                 diagnosis=FailureType.ABSTENTION_SUSPECTED,
                 evidence_score=ev_score,
+                evidence_model=ev_model,
                 evidence=evidence,
                 reasons=reasons,
                 limitations=limitations,
@@ -624,13 +695,21 @@ class RAGDiagnoser:
                 signals=signals,
             )
         else:
-            evidence.append(
-                f"Corpus audit yielded borderline score separation (clean top: {clean_top:.3f}, gap: {clean_gap:.3f})."
+            evidence.extend(support_report.evidence_notes)
+            reasons.extend(support_report.reasons)
+            limitations.extend(support_report.limitations)
+            ev_model = EvidenceModel(
+                corpus_support_strength=round(support_report.corpus_support_strength, 4),
+                answerability_signal=round(support_report.top_term_coverage, 4),
+                telemetry_completeness=completeness,
+                ambiguity=1.0,
+                reasons=reasons,
+                limitations=limitations,
             )
-            reasons.append("Ambiguous answerability: Cannot definitively confirm whether corpus supports this query.")
             return DiagnosticResult(
                 diagnosis=FailureType.UNKNOWN,
                 evidence_score=0.0,
+                evidence_model=ev_model,
                 evidence=evidence,
                 reasons=reasons,
                 limitations=limitations,

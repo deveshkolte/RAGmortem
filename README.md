@@ -2,8 +2,15 @@
 
 An open-source debugger for Retrieval-Augmented Generation (RAG) applications that isolates why an answer failed — whether due to retrieval miss, ranking miss, generator ignoring context, or failing to abstain.
 
-> **Status: Experimental (v0.1 / Day 7 Uncertainty-Aware & Evidence-Driven Diagnoser Complete)**  
-> RAGmortem is an active open-source project focused on local, explainable failure diagnosis for RAG applications. It deterministically attributes root causes across retrieval, ranking, generation, and abstention without requiring an external LLM judge.
+> **Status: Experimental (v0.1 / Day 8 Answerability & Abstention Discrimination)**  
+> **RAGmortem is an experimental deterministic RAG failure diagnoser.** It deterministically attributes root causes across retrieval, ranking, generation, and abstention without requiring an external LLM judge.
+>
+> **Current Benchmark Summary:**
+> - **88.0% – 96.0%** corpus-aware accuracy on BioTrial hidden holdout (100% unknown recall)
+> - **60.0%** trace-only accuracy (safely refuses unanswerable/retrieval ambiguities into UNKNOWN)
+> - **Ranking and generation diagnostics remain strong** (100% recall on holdout)
+> - **Abstention/retrieval separation remains the primary research problem**: background domain terminology overlap frequently causes elevated similarity in unanswerable queries
+> - **Explicit UNKNOWN handling**: deterministic refusal when telemetry or corpus evidence is ambiguous
 
 ---
 
@@ -11,12 +18,12 @@ An open-source debugger for Retrieval-Augmented Generation (RAG) applications th
 
 RAGmortem explicitly separates diagnostic evaluation into distinct operating modes and benchmark sets to ensure scientific credibility and prevent false claims of certainty:
 
-| Evaluation Mode / Benchmark | Input Requirements | Diagnostic Mechanism | Day 5 In-Sample (122 Cases) | Day 6 Baseline Holdout (120 Cases) | Day 7 Fresh Hidden Holdout (100 Cases) |
-| :--- | :--- | :--- | :---: | :---: | :---: |
-| **Realistic Observational Mode (Corpus-Aware)** | Execution trace + vector index query access | Candidate cutoff probe, relative score margins, corpus audit | **100.0%** (122/122) | **89.2%** (107/120 all) / **100%** unknown recall | **88.0%** (88/100 all) / **85.0%** resolved / **100%** unknown recall |
-| **Trace-Only Mode (Offline APM Telemetry)** | Execution trace only (zero vector index access) | Cutoff probe, refusal check, ambiguity bands | N/A | **50.8%** (61/120 all) / **50.0%** resolved | **60.0%** (60/100 all) / **50.0%** resolved (100% precision) |
-| **Reference-Assisted Mode** | Trace + developer expected reference answer | Answer correctness check, chunk containment scan | **100.0%** (122/122) | Evaluated on demand | Evaluated on demand |
-| **Oracle Upper-Bound Mode** | Trace + hidden gold evidence chunk | Single-chunk counterfactual oracle replay | **100.0%** (122/122) | 100.0% | 100.0% |
+| Evaluation Mode / Benchmark | Input Requirements | Diagnostic Mechanism | Day 5 In-Sample (122 Cases) | Day 6 Cloud Holdout (120 Cases) | Day 7/8 BioTrial Holdout (100 Cases) | Day 8 FinDebt Holdout (40 Cases) |
+| :--- | :--- | :--- | :---: | :---: | :---: | :---: |
+| **Realistic Observational Mode (Corpus-Aware)** | Execution trace + vector index query access | Candidate cutoff probe, relative score margins, question support audit | **100.0%** (122/122) | **90.8%** (109/120 all) / **100%** unknown recall | **96.0%** (96/100 all) / **95.0%** resolved / **100%** unknown recall | **65.0%** (26/40 all) / **83.3%** resolved |
+| **Trace-Only Mode (Offline APM Telemetry)** | Execution trace only (zero vector index access) | Cutoff probe, refusal check, ambiguity bands | N/A | **58.3%** (70/120 all) / **50.0%** resolved | **60.0%** (60/100 all) / **50.0%** resolved (100% precision) | **7.5%** (safely refuses to guess without corpus) |
+| **Reference-Assisted Mode** | Trace + developer expected reference answer | Answer correctness check, chunk containment scan | **100.0%** (122/122) | Evaluated on demand | Evaluated on demand | Evaluated on demand |
+| **Oracle Upper-Bound Mode** | Trace + hidden gold evidence chunk | Single-chunk counterfactual oracle replay | **100.0%** (122/122) | 100.0% | 100.0% | 100.0% |
 
 > **Critical Findings on Generalization & Uncertainty (Days 5, 6, & 7)**:  
 > - **Day 5 In-Sample Controlled Benchmark**: Achieved 100.0% accuracy on the synthetic operational dataset used during development. This served as an upper-bound verification that the taxonomy and heuristics are logically coherent.
