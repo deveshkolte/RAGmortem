@@ -1,0 +1,26 @@
+{
+  "case_id": "sample_abstention_failure",
+  "question": "What is the procedure for resetting a hardware cryptographic security module (HSM) on-premises?",
+  "generated_answer": "The procedure for resetting a hardware cryptographic security module (HSM) on-premises involves pressing the physical zeroize pin behind the tamper-evident bezel.",
+  "retrieved_chunk_ids": [
+    "chunk_external_vendor_review",
+    "chunk_api_rate_limit",
+    "chunk_secrets_rotation"
+  ],
+  "candidate_chunk_ids": [
+    "chunk_external_vendor_review",
+    "chunk_api_rate_limit",
+    "chunk_secrets_rotation"
+  ],
+  "scores": [
+    0.2694,
+    0.2379,
+    0.1620
+  ],
+  "top_k": 3,
+  "metadata": {
+    "environment": "production",
+    "generator_model": "mistral-7b-instruct",
+    "temperature": 0.2
+  }
+}

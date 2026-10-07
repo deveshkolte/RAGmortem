@@ -1,0 +1,37 @@
+{
+  "case_id": "sample_ranking_failure",
+  "question": "What is the mandatory engineering response time for a P1 incident?",
+  "generated_answer": "The mandatory engineering response SLA for Priority 2 incidents is 30 minutes from alert timestamp.",
+  "retrieved_chunk_ids": [
+    "chunk_incident_severity_p2",
+    "chunk_incident_severity_p3",
+    "chunk_postmortem_timeline"
+  ],
+  "candidate_chunk_ids": [
+    "chunk_incident_severity_p2",
+    "chunk_incident_severity_p3",
+    "chunk_postmortem_timeline",
+    "chunk_incident_severity_p1",
+    "chunk_communication_cadence",
+    "chunk_incident_commander_role"
+  ],
+  "scores": [
+    0.80,
+    0.75,
+    0.70
+  ],
+  "candidate_scores": [
+    0.80,
+    0.75,
+    0.70,
+    0.69,
+    0.65,
+    0.60
+  ],
+  "top_k": 3,
+  "metadata": {
+    "environment": "production",
+    "retriever": "hybrid_search",
+    "reranker": "cross_encoder_bge"
+  }
+}

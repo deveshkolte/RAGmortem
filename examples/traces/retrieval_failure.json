@@ -1,0 +1,25 @@
+{
+  "case_id": "sample_retrieval_failure",
+  "question": "What is the mandatory engineering response time for a P1 incident?",
+  "generated_answer": "The engineering infrastructure team must execute full disaster recovery and regional failover drills on a quarterly cadence.",
+  "retrieved_chunk_ids": [
+    "chunk_dr_drill_frequency",
+    "chunk_communication_cadence",
+    "chunk_vuln_high_sla"
+  ],
+  "candidate_chunk_ids": [
+    "chunk_dr_drill_frequency",
+    "chunk_communication_cadence",
+    "chunk_vuln_high_sla"
+  ],
+  "scores": [
+    0.1407,
+    0.1285,
+    0.1246
+  ],
+  "top_k": 3,
+  "metadata": {
+    "environment": "production",
+    "retriever": "dense_vector_cosine"
+  }
+}

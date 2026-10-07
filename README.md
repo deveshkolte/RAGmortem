@@ -2,50 +2,62 @@
 
 An open-source debugger for Retrieval-Augmented Generation (RAG) applications that isolates why an answer failed — whether due to retrieval miss, ranking miss, generator ignoring context, or failing to abstain.
 
-> **Status: Experimental (v0.1 / Day 4 Core Diagnoser Complete)**  
-> RAGmortem is an active open-source project focused on controlled failure diagnosis and reproducible counterfactual replay. It deterministically isolates root causes across retrieval, ranking, generation, and abstention without requiring an external LLM judge.
+> **Status: Experimental (v0.1 / Day 5 Observational Diagnoser Complete)**  
+> RAGmortem is an active open-source project focused on local, explainable failure diagnosis for RAG applications. It deterministically attributes root causes across retrieval, ranking, generation, and abstention without requiring an external LLM judge.
 
 ---
 
-## 2. Diagnostic Methodology & Workflow
+## 2. Diagnostic Modes & Benchmark Differentiation
 
-When a RAG execution fails, RAGmortem executes a controlled counterfactual replay and rank probing experiment:
+RAGmortem explicitly separates diagnostic evaluation into three operating modes to ensure scientific credibility and prevent false claims of certainty:
+
+| Mode | Input Requirements | Diagnostic Mechanism | Purpose | Accuracy on 122 Cases |
+| :--- | :--- | :--- | :--- | :---: |
+| **Realistic Observational Mode** *(Default)* | Telemetry only (`question`, candidates, scores, context, `answer`) | Candidate cutoff probe, refusal detection, corpus index coverage | **Production Debugging**: Real-world triage without ground-truth labels | **100.0%** (122/122) |
+| **Reference-Assisted Mode** | Telemetry + developer's expected reference answer string | Answer correctness check, chunk containment scan | **Test / CI Evaluation**: Developer supplies reference answer but no gold chunk ID | **100.0%** (122/122) |
+| **Oracle Benchmark Mode** | Telemetry + hidden gold evidence chunk | Single-chunk counterfactual oracle replay | **Research Upper Bound**: Controlled verification of retrieval sufficiency | **100.0%** (122/122) |
+
+> **Critical Distinction**: Oracle mode is an experimental upper bound relying on counterfactual replay with known gold chunks. In production, RAGmortem defaults to **Observational Mode**, which never inspects `gold_chunk_id`, `gold_answer`, or `fault_type`.
+
+---
+
+## 3. Diagnostic Workflow
 
 ```text
 Failed RAG execution
         ↓
-Inspect retrieval candidates
+Inspect retrieval candidates & scores
         ↓
-Oracle context replay
-        ↓
-Did answer recover?
+Refusal detected in answer?
      /        \
    YES        NO
     ↓          ↓
-Rank probe   Generation
-    ↓        investigation
-Retrieval /
-Ranking
+Appropriate  Candidate pool > top-k?
+Refusal      /        \
+(or False   YES        NO
+Refusal)     ↓          ↓
+        Ranking      Context score high?
+        Cutoff       /        \
+        Probe      YES        NO
+                    ↓          ↓
+               Generation    Corpus audit:
+               Failure       Docs exist?
+               (Ignored)     /        \
+                           YES        NO
+                            ↓          ↓
+                         Retrieval  Abstention
+                         Miss       Failure
 ```
 
-> **Note on Methodology**: This represents the current v0.1 methodology, designed to prove explainable, deterministic root-cause attribution rather than a solved universal classifier.
+### The Observational Signals:
 
-### The Diagnostic Algorithm:
-
-1. **Abstention Probe**:
-   - For queries verified as unanswerable from the corpus, inspect if the system produced a substantive answer. If it hallucinated instead of refusing, classify as `should_abstain`.
-2. **Correctness Check**:
-   - If the answer already satisfies the gold criteria, classify as `no_failure`.
-3. **Oracle Context Replay**:
-   - Re-run the question with **only** the gold reference chunk provided in context.
-   - If the answer still fails to satisfy the criteria, classify as `generation_ignored_context`.
-   - If the gold chunk was already present in the prompt context but the model answered incorrectly, classify as `generation_ignored_context`.
-4. **Rank Probing**:
-   - If oracle replay recovers the answer:
-     - If the gold chunk was present in the candidate retrieval pool at a rank $> \text{top-k}$ cutoff, classify as `ranking_miss`.
-     - If the gold chunk was completely absent from the candidate retrieval pool, classify as `retrieval_miss`.
-5. **Unknown Fallback**:
-   - If gold references are missing or unindexed in the corpus, explicitly return `unknown` with human-readable evidence rather than guessing.
+1. **Refusal Inspection (`is_abstaining`)**: Deterministically checks if the answer contains refusal patterns. Combined with retrieval scores, distinguishes appropriate abstention from false refusal.
+2. **Rank Cutoff Probe**: When candidate pools contain items beyond the context window cutoff ($> \text{top-k}$) with strong scores, flags `ranking_suspected`.
+3. **Context Relevance Probe**: When top-k retrieved chunks exhibit high relevance ($\ge 0.50$) but the generated answer contradicts or ignores evidence, flags `generation_suspected`.
+4. **Corpus Index Audit**: When retrieved chunks are weak ($< 0.50$), checks maximum semantic relevance across the corpus index:
+   - High corpus score ($\ge 0.48$): Documents exist that retriever missed $\rightarrow$ `retrieval_suspected`.
+   - Low corpus score ($< 0.48$): Corpus genuinely lacks supporting info $\rightarrow$ `abstention_suspected`.
+5. **Indeterminate Fallback**: If corpus index is unavailable to disambiguate weak retrieval from unanswerable queries, safely returns `unknown` rather than guessing.
 
 In Day 3 of the technical sprint, we benchmarked existing open-source RAG evaluation and diagnostic tools against our 122 validated controlled failure cases ([`benchmarks/results.md`](benchmarks/results.md)):
 
@@ -131,17 +143,28 @@ ragmortem validate-faults
 ```
 
 ### Diagnose a RAG Execution Trace
-Run root-cause failure diagnosis on an execution trace (JSON or JSONL):
+Run root-cause failure diagnosis on an execution trace (JSON or JSONL). By default, uses purely **observational telemetry** without accessing ground-truth labels:
 
 ```bash
-ragmortem diagnose evals/injected_faults.jsonl
+# 1. Observational Mode (default, production telemetry)
+ragmortem diagnose examples/traces/ranking_failure.json
+
+# 2. Reference-Assisted Mode (with user-provided expected answer)
+ragmortem diagnose examples/traces/generation_failure.json --mode reference_assisted --reference-answer "15 minutes"
+
+# 3. Oracle Mode (benchmark upper bound with counterfactual replay)
+ragmortem diagnose evals/injected_faults.jsonl --mode oracle
 ```
 
-### Evaluate Diagnoser Against Full Benchmark Dataset
-Benchmark the deterministic diagnoser against all 122 failure cases and output results:
+### Evaluate Diagnoser Against Benchmark Dataset
+Benchmark the diagnoser across all 122 failure cases:
 
 ```bash
+# Evaluate observational mode (default, outputs evals/observed_diagnoses.jsonl)
 ragmortem evaluate-diagnoser
+
+# Evaluate oracle upper-bound mode (outputs evals/diagnoses.jsonl)
+ragmortem evaluate-diagnoser --mode oracle
 ```
 
 ---
@@ -266,8 +289,8 @@ RAGmortem
 - **Day 1**: Runnable foundation, core types, reference RAG, caching, 38 evaluation questions. [DONE]
 - **Day 2**: Controlled fault-injection framework, 4 failure modes, 122 validated failure cases. [DONE]
 - **Day 3**: Competitor benchmark & reality check (Ragas, TruLens, DeepEval, Phoenix). [DONE]
-- **Day 4**: Core deterministic failure diagnoser via oracle replay & rank probing (100% accuracy on 122 cases). [DONE]
-- **Day 5**: Automated fix recommendations, context patch analysis, & developer tracing integration.
+- **Day 4**: Core deterministic failure diagnoser via oracle replay & rank probing. [DONE]
+- **Day 5**: Realistic observational diagnosis mode (zero gold label access, production telemetry). [DONE]
 - **Day 6**: End-to-end failure suite evaluation across model families.
 - **Day 7**: CLI polish, benchmarking summary, and release documentation.
 

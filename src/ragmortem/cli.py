@@ -246,7 +246,7 @@ def cmd_diagnose(args: argparse.Namespace) -> int:
         print(f"Error: Corpus directory '{corpus_dir}' does not exist.", file=sys.stderr)
         return 1
 
-    from ragmortem.diagnose import ExecutionTrace, RAGDiagnoser
+    from ragmortem.diagnose import ExecutionTrace, ObservedExecution, RAGDiagnoser
 
     app = ReferenceRagApp(corpus_dir=corpus_dir, mock_mode=True)
     diagnoser = RAGDiagnoser(app=app)
@@ -262,38 +262,68 @@ def cmd_diagnose(args: argparse.Namespace) -> int:
                 if line:
                     raw_items.append(json.loads(line))
 
+    mode_label = args.mode.upper()
     print("=" * 70)
-    print("RAGmortem Failure Diagnoser")
+    print(f"RAGmortem Failure Diagnoser [{mode_label} MODE]")
     print(f"Target: {input_path} ({len(raw_items)} trace(s))")
     print(f"Corpus: {corpus_dir}")
     print("=" * 70)
 
     for i, item in enumerate(raw_items, start=1):
-        if "fault" in item or "fault_type" in item:
-            from ragmortem.faults.models import InjectedFaultCase
+        case_id = item.get("case_id") or f"trace_{i}"
 
-            case = InjectedFaultCase.from_dict(item)
-            trace = ExecutionTrace.from_injected_case(case)
+        if args.mode == "oracle":
+            if "fault" in item or "fault_type" in item:
+                from ragmortem.faults.models import InjectedFaultCase
+                case = InjectedFaultCase.from_dict(item)
+                trace = ExecutionTrace.from_injected_case(case)
+            else:
+                trace = ExecutionTrace(
+                    question=item.get("question", ""),
+                    generated_answer=item.get("generated_answer") or item.get("answer", ""),
+                    retrieved_chunk_ids=item.get("retrieved_chunk_ids") or item.get("retrieved_ids", []),
+                    candidate_chunk_ids=item.get("candidate_chunk_ids") or item.get("candidate_retrieved_ids"),
+                    scores=item.get("scores"),
+                    gold_chunk_id=item.get("gold_chunk_id"),
+                    gold_answer=item.get("gold_answer"),
+                    question_type=item.get("question_type", "answerable"),
+                    case_id=case_id,
+                    metadata=item.get("metadata", {}),
+                )
+            diag = diagnoser.diagnose_oracle(trace)
+            q_text = trace.question
+            ans_text = trace.generated_answer
+        elif args.mode == "reference_assisted":
+            ref_ans = args.reference_answer or item.get("reference_answer") or item.get("gold_answer")
+            if not ref_ans:
+                print(f"Error: Case '{case_id}' requires a reference answer via --reference-answer or trace field.", file=sys.stderr)
+                return 1
+            if "fault" in item or "fault_type" in item:
+                from ragmortem.faults.models import InjectedFaultCase
+                case = InjectedFaultCase.from_dict(item)
+                obs_trace = ObservedExecution.from_injected_case(case)
+            else:
+                obs_trace = ObservedExecution.from_dict(item)
+            diag = diagnoser.diagnose_reference_assisted(obs_trace, ref_ans)
+            q_text = obs_trace.question
+            ans_text = obs_trace.generated_answer
         else:
-            trace = ExecutionTrace(
-                question=item.get("question", ""),
-                generated_answer=item.get("generated_answer") or item.get("answer", ""),
-                retrieved_chunk_ids=item.get("retrieved_chunk_ids") or item.get("retrieved_ids", []),
-                candidate_chunk_ids=item.get("candidate_chunk_ids") or item.get("candidate_retrieved_ids"),
-                scores=item.get("scores"),
-                gold_chunk_id=item.get("gold_chunk_id"),
-                gold_answer=item.get("gold_answer"),
-                question_type=item.get("question_type", "answerable"),
-                case_id=item.get("case_id"),
-                metadata=item.get("metadata", {}),
-            )
+            # Observed mode (default, strictly no gold labels)
+            if "fault" in item or "fault_type" in item:
+                from ragmortem.faults.models import InjectedFaultCase
+                case = InjectedFaultCase.from_dict(item)
+                obs_trace = ObservedExecution.from_injected_case(case)
+            else:
+                obs_trace = ObservedExecution.from_dict(item)
+            diag = diagnoser.diagnose_observed(obs_trace)
+            q_text = obs_trace.question
+            ans_text = obs_trace.generated_answer
 
-        diag = diagnoser.diagnose(trace)
-
-        print(f"\n[{i}/{len(raw_items)}] Case: {trace.case_id or 'trace'}")
-        print(f"  Question:         {trace.question}")
-        print(f"  Generated Answer: {trace.generated_answer}")
-        print(f"  Diagnosis:        {diag.diagnosis.value.upper()} (Confidence: {diag.confidence:.2f})")
+        suspect_tag = " (SUSPECTED)" if diag.is_suspected else ""
+        print(f"\n[{i}/{len(raw_items)}] Case: {case_id}")
+        print(f"  Question:         {q_text}")
+        print(f"  Generated Answer: {ans_text}")
+        print(f"  Diagnosis:        {diag.diagnosis.value.upper()}{suspect_tag} (Confidence: {diag.confidence:.2f})")
         print("  Evidence:")
         for ev in diag.evidence:
             print(f"    • {ev}")
@@ -315,7 +345,12 @@ def cmd_evaluate_diagnoser(args: argparse.Namespace) -> int:
     """Evaluate diagnoser against the benchmark dataset and write report."""
     faults_path = Path(args.faults)
     corpus_dir = Path(args.corpus)
-    output_path = Path(args.output)
+
+    mode = args.mode or "observed"
+    if args.output:
+        output_path = Path(args.output)
+    else:
+        output_path = Path("evals/observed_diagnoses.jsonl") if mode == "observed" else Path("evals/diagnoses.jsonl")
 
     if not faults_path.exists():
         print(f"Error: Faults file '{faults_path}' does not exist.", file=sys.stderr)
@@ -324,20 +359,29 @@ def cmd_evaluate_diagnoser(args: argparse.Namespace) -> int:
         print(f"Error: Corpus directory '{corpus_dir}' does not exist.", file=sys.stderr)
         return 1
 
-    from ragmortem.diagnose import RAGDiagnoser, evaluate_diagnoser_on_dataset
+    from ragmortem.diagnose import (
+        RAGDiagnoser,
+        evaluate_diagnoser_on_dataset,
+        evaluate_observed_on_dataset,
+    )
     from ragmortem.faults.inject import load_injected_faults
 
     app = ReferenceRagApp(corpus_dir=corpus_dir, mock_mode=True)
     diagnoser = RAGDiagnoser(app=app)
     cases = load_injected_faults(faults_path)
 
+    mode_label = "OBSERVATIONAL (NO GOLD LABELS)" if mode == "observed" else "ORACLE UPPER BOUND (GOLD REPLAY)"
     print("=" * 70)
-    print("Evaluating RAGmortem Diagnoser on Benchmark Dataset")
+    print(f"Evaluating RAGmortem Diagnoser on Benchmark Dataset [{mode_label}]")
     print(f"Dataset: {faults_path} ({len(cases)} cases)")
     print(f"Corpus:  {corpus_dir}")
+    print(f"Mode:    {mode}")
     print("=" * 70)
 
-    results = evaluate_diagnoser_on_dataset(cases, diagnoser)
+    if mode == "observed":
+        results = evaluate_observed_on_dataset(cases, diagnoser)
+    else:
+        results = evaluate_diagnoser_on_dataset(cases, diagnoser)
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
@@ -500,6 +544,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Path to trace JSON file or JSONL dataset of traces.",
     )
     diag_parser.add_argument(
+        "--mode",
+        choices=["observed", "oracle", "reference_assisted"],
+        default="observed",
+        help="Diagnostic operating mode: observed (default, production telemetry), oracle (benchmark upper bound), or reference_assisted",
+    )
+    diag_parser.add_argument(
+        "--reference-answer",
+        default=None,
+        help="Expected reference answer string (used in reference_assisted mode)",
+    )
+    diag_parser.add_argument(
         "--corpus",
         default="examples/reference_rag/documents",
         help="Path to documents directory (default: examples/reference_rag/documents)",
@@ -516,14 +571,20 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Path to injected faults JSONL file (default: evals/injected_faults.jsonl)",
     )
     eval_diag_parser.add_argument(
+        "--mode",
+        choices=["observed", "oracle"],
+        default="observed",
+        help="Evaluation mode: observed (default, realistic telemetry) or oracle (gold replay)",
+    )
+    eval_diag_parser.add_argument(
         "--corpus",
         default="examples/reference_rag/documents",
         help="Path to documents directory (default: examples/reference_rag/documents)",
     )
     eval_diag_parser.add_argument(
         "--output",
-        default="evals/diagnoses.jsonl",
-        help="Output destination for diagnoses JSONL (default: evals/diagnoses.jsonl)",
+        default=None,
+        help="Output destination for diagnoses JSONL (defaults to evals/observed_diagnoses.jsonl or evals/diagnoses.jsonl)",
     )
 
     args = parser.parse_args(argv)
