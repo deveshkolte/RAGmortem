@@ -74,6 +74,20 @@ export GROQ_API_KEY="your_groq_api_key_here"
 ragmortem run-reference
 ```
 
+### Generate Controlled Failure Dataset
+Synthetically inject controlled failures across the 4 failure modes (100% deterministic, offline):
+
+```bash
+ragmortem generate-faults
+```
+
+### Validate Injected Fault Dataset
+Verify that all generated cases strictly adhere to their ground-truth failure conditions:
+
+```bash
+ragmortem validate-faults
+```
+
 ---
 
 ## 4. Reference RAG
@@ -87,7 +101,30 @@ The included reference RAG application (`examples/reference_rag/`) operates on a
 
 ---
 
-## 5. Dataset Format
+## 5. Controlled Failure Dataset
+
+RAGmortem deliberately breaks a reference RAG system in known, controlled ways. Every generated failure case preserves its original baseline execution and receives a trustworthy ground-truth label verified against strict validation criteria. These labelled failures serve as the gold-standard benchmark to evaluate the diagnosis engine in subsequent sprint phases.
+
+> **Scope Note**: This failure taxonomy is not claimed to encompass every possible failure mode across all RAG deployments. In v1, RAGmortem strictly focuses on four canonical root causes:
+
+1. **Retrieval Miss (`retrieval_miss`)**:
+   - *What happens*: The gold chunk containing the required evidence exists in the corpus/index, but the retriever fails to retrieve it within the top-k candidate set.
+   - *Strict Rule*: The gold chunk must **never** be deleted from the corpus (which would turn it into an abstention failure). The gold chunk is omitted purely through controlled query representation degradation.
+2. **Ranking Miss (`ranking_miss`)**:
+   - *What happens*: The gold chunk is successfully found within the broader candidate pool (e.g. top-6), but falls below the final top-k cutoff (e.g. ranked at #4 when context window is top-3) and is excluded from prompt context.
+   - *Strict Rule*: The gold chunk must exist in the candidate pool with rank > top-k.
+3. **Generation Ignored Context (`generation_ignored_context`)**:
+   - *What happens*: The gold chunk is present directly in the prompt context supplied to the LLM, but the generator ignores the evidence and outputs an incorrect or contradictory answer.
+   - *Strict Rule*: The failure must not be caused by retrieval; the gold chunk must be proven to be inside the LLM prompt.
+4. **Should Abstain (`should_abstain`)**:
+   - *What happens*: The user question cannot be answered from the corpus, but the system produces a confident, fabricated answer instead of refusing or abstaining.
+   - *Strict Rule*: The question must genuinely have no supporting evidence in the corpus, and the system must output a non-abstaining response.
+
+Dataset records are saved to `evals/injected_faults.jsonl`.
+
+---
+
+## 6. Dataset Format
 
 Evaluation questions are stored in JSON Lines (`evals/questions.jsonl`):
 
@@ -114,7 +151,7 @@ Rules:
 
 ---
 
-## 6. Architecture
+## 7. Architecture
 
 ```
 RAGmortem
@@ -129,30 +166,44 @@ RAGmortem
 │       ├── taxonomy.py                # FailureType definitions
 │       ├── cache.py                   # Deterministic ModelCache
 │       ├── dataset.py                 # Loader and validator for evaluation questions
-│       └── cli.py                     # CLI commands (validate-dataset, run-reference)
+│       ├── cli.py                     # CLI commands (run-reference, generate-faults, validate-faults)
+│       └── faults/                    # Controlled fault injection framework
+│           ├── __init__.py            # Module exports
+│           ├── models.py              # FaultConfig, BaselineExecution, InjectedFaultCase
+│           ├── eval.py                # Answer verification & strict fault validators
+│           └── inject.py              # FaultInjector engine & dataset generator
 ├── examples/
 │   └── reference_rag/
 │       ├── README.md                  # Reference RAG documentation
 │       ├── app.py                     # Runnable reference RAG pipeline
 │       └── documents/                 # Reference technical policy corpus
 ├── evals/
-│   └── questions.jsonl                # 38 evaluation questions
-└── tests/                             # Full test suite (16 tests, 100% offline runnable)
+│   ├── questions.jsonl                # 38 evaluation questions
+│   └── injected_faults.jsonl          # 122 validated synthetic failure cases
+└── tests/                             # Full test suite (24 tests, 100% offline runnable)
+    ├── test_types.py
+    ├── test_adapter.py
+    ├── test_cache.py
+    ├── test_dataset_validation.py
+    ├── test_mock_rag.py
+    ├── test_retrieval.py
+    └── test_faults.py
 ```
 
 ---
 
-## 7. Current Limitations
+## 8. Current Limitations
 
 - **Single-hop factual focus**: v0.1 supports single-chunk answerable questions. Multi-hop and temporal reasoning queries are out of scope.
 - **In-memory Vector Store**: Designed for small reference corpora (<10,000 chunks) using NumPy rather than distributed vector databases.
-- **No Automated Fault Injection Yet**: Day 1 establishes the baseline; controlled fault injection and diagnostic probes are planned for subsequent milestones.
+- **Offline Judge**: Day 2 uses deterministic token/sequence matching; full counterfactual replay and LLM judge are slated for Days 3–5.
 
 ---
 
-## 8. Roadmap
+## 9. Roadmap
 
-- **Day 2**: Failure injection harnesses (synthetic retrieval drops, rank demotion, irrelevant context injection).
+- **Day 1**: Runnable foundation, core types, reference RAG, caching, 38 evaluation questions.
+- **Day 2**: Controlled fault-injection framework, 4 failure modes, 122 validated failure cases.
 - **Day 3**: Counterfactual replay engine (swapping retrieved chunks to isolate cause).
 - **Day 4**: Failure diagnostic judge & attribution scoring.
 - **Day 5**: Automated fix recommendations and context patch analysis.
@@ -164,3 +215,4 @@ RAGmortem
 ## License
 
 Apache-2.0 License. See [LICENSE](LICENSE) for details.
+

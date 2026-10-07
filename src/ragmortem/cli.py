@@ -133,6 +133,106 @@ def cmd_run_reference(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_generate_faults(args: argparse.Namespace) -> int:
+    """Generate controlled RAG failure cases and output to JSONL dataset."""
+    questions_path = Path(args.questions)
+    corpus_dir = Path(args.corpus)
+    output_path = Path(args.output)
+
+    if not questions_path.exists():
+        print(f"Error: Questions file '{questions_path}' does not exist.", file=sys.stderr)
+        return 1
+    if not corpus_dir.exists():
+        print(f"Error: Corpus directory '{corpus_dir}' does not exist.", file=sys.stderr)
+        return 1
+
+    from ragmortem.faults.inject import generate_fault_dataset, save_injected_faults
+
+    print("Generating controlled failures...")
+    questions = load_questions(questions_path)
+    app = ReferenceRagApp(corpus_dir=corpus_dir, top_k=args.top_k, mock_mode=True)
+
+    cases = generate_fault_dataset(
+        questions=questions,
+        app=app,
+        seed=args.seed,
+        top_k=args.top_k,
+    )
+
+    save_injected_faults(cases, output_path)
+
+    # Summarize fault counts
+    counts: dict[str, int] = {}
+    valid_count = 0
+    invalid_count = 0
+
+    for c in cases:
+        counts[c.fault_type] = counts.get(c.fault_type, 0) + 1
+        if c.validated:
+            valid_count += 1
+        else:
+            invalid_count += 1
+
+    print()
+    for ftype, cnt in sorted(counts.items()):
+        print(f"  {ftype:<24} {cnt}")
+    print()
+    print(f"  TOTAL                    {len(cases)}")
+    print()
+    print("Validation:")
+    print(f"  {valid_count}/{len(cases)} valid")
+    print(f"  {invalid_count} invalid")
+    print(f"\nSaved to: {output_path}")
+
+    return 0 if invalid_count == 0 else 1
+
+
+def cmd_validate_faults(args: argparse.Namespace) -> int:
+    """Validate an existing injected fault dataset against the corpus."""
+    faults_path = Path(args.faults)
+    corpus_dir = Path(args.corpus)
+
+    if not faults_path.exists():
+        print(f"Error: Faults file '{faults_path}' does not exist.", file=sys.stderr)
+        return 1
+    if not corpus_dir.exists():
+        print(f"Error: Corpus directory '{corpus_dir}' does not exist.", file=sys.stderr)
+        return 1
+
+    from ragmortem.faults.eval import validate_fault_case
+    from ragmortem.faults.inject import load_injected_faults
+
+    chunks = load_corpus_from_directory(corpus_dir)
+    chunk_ids = {c.id for c in chunks}
+    cases = load_injected_faults(faults_path)
+
+    print(f"Validating {len(cases)} fault cases from {faults_path}...")
+
+    valid_count = 0
+    invalid_count = 0
+    errors: list[str] = []
+
+    for c in cases:
+        is_valid, reason = validate_fault_case(c, chunk_ids, top_k=args.top_k)
+        if is_valid:
+            valid_count += 1
+        else:
+            invalid_count += 1
+            errors.append(f"Case '{c.case_id}' ({c.fault_type}): {reason}")
+
+    print(f"Validation: {valid_count}/{len(cases)} valid, {invalid_count} invalid")
+    if errors:
+        print("\nErrors detected:", file=sys.stderr)
+        for err in errors[:10]:
+            print(f"  [ERROR] {err}", file=sys.stderr)
+        if len(errors) > 10:
+            print(f"  ... and {len(errors) - 10} more errors.", file=sys.stderr)
+        return 1
+
+    print("All injected fault cases successfully validated!")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """CLI Entrypoint for RAGmortem."""
     parser = argparse.ArgumentParser(
@@ -190,14 +290,74 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Limit number of questions to process (useful for quick smoke tests).",
     )
 
+    # generate-faults
+    gen_parser = subparsers.add_parser(
+        "generate-faults",
+        help="Generate controlled synthetic RAG failure dataset.",
+    )
+    gen_parser.add_argument(
+        "--questions",
+        default="evals/questions.jsonl",
+        help="Path to questions JSONL file (default: evals/questions.jsonl)",
+    )
+    gen_parser.add_argument(
+        "--corpus",
+        default="examples/reference_rag/documents",
+        help="Path to documents directory (default: examples/reference_rag/documents)",
+    )
+    gen_parser.add_argument(
+        "--output",
+        default="evals/injected_faults.jsonl",
+        help="Output JSONL destination (default: evals/injected_faults.jsonl)",
+    )
+    gen_parser.add_argument(
+        "--seed",
+        type=int,
+        default=42,
+        help="Random seed for deterministic generation (default: 42)",
+    )
+    gen_parser.add_argument(
+        "--top-k",
+        type=int,
+        default=3,
+        help="Top-k retrieval cut-off (default: 3)",
+    )
+
+    # validate-faults
+    val_faults_parser = subparsers.add_parser(
+        "validate-faults",
+        help="Validate injected fault dataset labels and ground truth.",
+    )
+    val_faults_parser.add_argument(
+        "--faults",
+        default="evals/injected_faults.jsonl",
+        help="Path to injected faults JSONL file (default: evals/injected_faults.jsonl)",
+    )
+    val_faults_parser.add_argument(
+        "--corpus",
+        default="examples/reference_rag/documents",
+        help="Path to documents directory (default: examples/reference_rag/documents)",
+    )
+    val_faults_parser.add_argument(
+        "--top-k",
+        type=int,
+        default=3,
+        help="Top-k retrieval cut-off (default: 3)",
+    )
+
     args = parser.parse_args(argv)
 
     if args.command == "validate-dataset":
         return cmd_validate_dataset(args)
     elif args.command == "run-reference":
         return cmd_run_reference(args)
+    elif args.command == "generate-faults":
+        return cmd_generate_faults(args)
+    elif args.command == "validate-faults":
+        return cmd_validate_faults(args)
     return 1
 
 
 if __name__ == "__main__":
     sys.exit(main())
+
