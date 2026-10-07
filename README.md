@@ -2,22 +2,27 @@
 
 An open-source debugger for Retrieval-Augmented Generation (RAG) applications that isolates why an answer failed — whether due to retrieval miss, ranking miss, generator ignoring context, or failing to abstain.
 
-> **Status: Experimental (v0.1 / Day 5 Observational Diagnoser Complete)**  
+> **Status: Experimental (v0.1 / Day 6 Adversarial Holdout Validation Complete)**  
 > RAGmortem is an active open-source project focused on local, explainable failure diagnosis for RAG applications. It deterministically attributes root causes across retrieval, ranking, generation, and abstention without requiring an external LLM judge.
 
 ---
 
-## 2. Diagnostic Modes & Benchmark Differentiation
+## 2. Diagnostic Modes & Validation Benchmarks
 
-RAGmortem explicitly separates diagnostic evaluation into three operating modes to ensure scientific credibility and prevent false claims of certainty:
+RAGmortem explicitly separates diagnostic evaluation into distinct operating modes and benchmark sets to ensure scientific credibility and prevent false claims of certainty:
 
-| Mode | Input Requirements | Diagnostic Mechanism | Purpose | Accuracy on 122 Cases |
-| :--- | :--- | :--- | :--- | :---: |
-| **Realistic Observational Mode** *(Default)* | Telemetry only (`question`, candidates, scores, context, `answer`) | Candidate cutoff probe, refusal detection, corpus index coverage | **Production Debugging**: Real-world triage without ground-truth labels | **100.0%** (122/122) |
-| **Reference-Assisted Mode** | Telemetry + developer's expected reference answer string | Answer correctness check, chunk containment scan | **Test / CI Evaluation**: Developer supplies reference answer but no gold chunk ID | **100.0%** (122/122) |
-| **Oracle Benchmark Mode** | Telemetry + hidden gold evidence chunk | Single-chunk counterfactual oracle replay | **Research Upper Bound**: Controlled verification of retrieval sufficiency | **100.0%** (122/122) |
+| Evaluation Mode / Benchmark | Input Requirements | Diagnostic Mechanism | In-Sample Benchmark (122 Cases) | Out-of-Sample Holdout (120 Cases) |
+| :--- | :--- | :--- | :---: | :---: |
+| **Realistic Observational Mode (Trace + Corpus)** | Execution telemetry + vector index query access | Candidate cutoff probe, refusal detection, corpus index audit | **100.0%** (122/122) | **81.7%** (98/120 all) / **98.0%** (98/100 resolved) |
+| **Trace-Only Mode (Offline APM Telemetry)** | Execution telemetry only (no vector index access) | Cutoff probe, refusal check, score heuristics | N/A | **50.8%** (61/120 all) / **50.0%** (50/100 resolved) |
+| **Reference-Assisted Mode** | Telemetry + developer expected reference answer | Answer correctness check, chunk containment scan | **100.0%** (122/122) | Evaluated on demand |
+| **Oracle Upper-Bound Mode** | Telemetry + hidden gold evidence chunk | Single-chunk counterfactual oracle replay | **100.0%** (122/122) | 100.0% |
 
-> **Critical Distinction**: Oracle mode is an experimental upper bound relying on counterfactual replay with known gold chunks. In production, RAGmortem defaults to **Observational Mode**, which never inspects `gold_chunk_id`, `gold_answer`, or `fault_type`.
+> **Critical Caveat Regarding Generalization**:  
+> The 100.0% accuracy achieved on Day 5 was an in-sample result on the synthetic operational dataset used during development. In the Day 6 **adversarial holdout validation** (testing an entirely separate domain of 50 cloud/compliance chunks and 120 new failure cases including 20 ambiguous cases):
+> - **Resolved Failures**: Achieved **98.0%** accuracy across clean retrieval, ranking, generation, and abstention failures.
+> - **Ambiguous / Unknown Cases**: Achieved **0.0% recall on unknown** in corpus-aware mode because current heuristics forcibly partition the feature space into the four known failure types.
+> - **Trace-Only Limitation**: Without active corpus index access, the system cannot distinguish unanswerable queries from retriever misses and safely defaults to `unknown` on low-relevance responses (49.2% coverage).
 
 ---
 
