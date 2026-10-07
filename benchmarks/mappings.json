@@ -1,0 +1,100 @@
+{
+  "tools": {
+    "Ragas": {
+      "package": "ragas",
+      "version": "0.4.3",
+      "installation_status": "FAILED_TIMEOUT",
+      "installation_notes": "Heavy transitive dependency tree (LangChain, datasets, pyarrow, openai) timed out during package resolution/download in isolated environment.",
+      "taxonomy_mapping": {
+        "retrieval_miss": {
+          "status": "PARTIAL",
+          "evidence": "Uses continuous metric 'context_recall' (0.0-1.0). Low recall indicates missing evidence, but does not distinguish omission from corpus vs retrieval failure."
+        },
+        "ranking_miss": {
+          "status": "PARTIAL",
+          "evidence": "Uses continuous metric 'context_precision'. Measures whether relevant items appear earlier, but cannot verify whether gold chunk fell just outside top-k context window."
+        },
+        "generation_ignored_context": {
+          "status": "PARTIAL",
+          "evidence": "Uses 'faithfulness' metric. Measures if answer claims are entailed by context; indicates ungroundedness but lacks discrete root-cause attribution."
+        },
+        "should_abstain": {
+          "status": "NOT_SUPPORTED",
+          "evidence": "No native abstention metric for unanswerable queries; evaluates context relevancy and faithfulness against non-existent evidence, yielding misleading scores."
+        }
+      }
+    },
+    "PyVectorHound": {
+      "package": "pyvectorhound",
+      "version": "1.5.0",
+      "installation_status": "FAILED_BROKEN_WHEEL",
+      "installation_notes": "PyPI wheel is corrupted: contains only a .pth file hardcoded to author's local drive (/Users/georgimullassery/pyvectorhound) and zero Python modules.",
+      "taxonomy_mapping": {
+        "retrieval_miss": {
+          "status": "SUPPORTED",
+          "evidence": "Core Rust engine computes embedding isotropy, vector coverage, and recall against expected docs in vector DB."
+        },
+        "ranking_miss": {
+          "status": "PARTIAL",
+          "evidence": "Calculates MRR/NDCG on candidate pool, but reranker diagnostics are explicitly documented as UNKNOWN / Not Implemented."
+        },
+        "generation_ignored_context": {
+          "status": "NOT_SUPPORTED",
+          "evidence": "Explicitly scoped exclusively to retrieval; does not inspect LLM generation, prompt context utilization, or text generation errors."
+        },
+        "should_abstain": {
+          "status": "NOT_SUPPORTED",
+          "evidence": "Has no concept of query unanswerability or model refusal/abstention."
+        }
+      }
+    },
+    "DeepDiag_RAGDiag": {
+      "package": "deepdiag-eu-ai-act",
+      "version": "GitHub main",
+      "installation_status": "NOT_A_PACKAGE",
+      "installation_notes": "Interactive Streamlit application hardcoded to 306 legal chunks of the EU AI Act; not a reusable Python library or CLI.",
+      "taxonomy_mapping": {
+        "retrieval_miss": {
+          "status": "PARTIAL",
+          "evidence": "Classifies errors coarsely into 'Retrieval-bound' (~28%); lumps all retrieval and ranking failures together."
+        },
+        "ranking_miss": {
+          "status": "NOT_SUPPORTED",
+          "evidence": "Does not differentiate between candidates excluded from the search pool vs candidates excluded by top-k truncation."
+        },
+        "generation_ignored_context": {
+          "status": "PARTIAL",
+          "evidence": "Classifies errors into 'Generation-bound' (~26%) if gold chunk is retrieved but answer is unfaithful."
+        },
+        "should_abstain": {
+          "status": "NOT_SUPPORTED",
+          "evidence": "Assumes all queries are answerable legal questions; no abstention detection."
+        }
+      }
+    },
+    "RAG_Oracle": {
+      "package": "N/A",
+      "version": "Conceptual ablation baseline",
+      "installation_status": "NOT_A_TOOL",
+      "installation_notes": "Research ablation methodology (manually supplying gold context to measure generation ceiling) rather than a software tool.",
+      "taxonomy_mapping": {
+        "retrieval_miss": {
+          "status": "PARTIAL",
+          "evidence": "If Oracle RAG succeeds while standard RAG fails, attributes failure to retrieval, but cannot diagnose why retrieval failed."
+        },
+        "ranking_miss": {
+          "status": "NOT_SUPPORTED",
+          "evidence": "Oracle substitution bypasses ranking entirely, providing zero diagnostic signal on rank truncation."
+        },
+        "generation_ignored_context": {
+          "status": "PARTIAL",
+          "evidence": "If Oracle RAG also fails with gold context present, attributes failure to generation."
+        },
+        "should_abstain": {
+          "status": "NOT_SUPPORTED",
+          "evidence": "Undefined on unanswerable queries where no gold chunk exists to inject."
+        }
+      }
+    }
+  }
+}

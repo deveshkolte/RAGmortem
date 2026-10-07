@@ -19,7 +19,23 @@ RAGmortem provides a systematic, reproducible method to trace and attribute thes
 
 ---
 
-## 2. Current v0.1 Scope
+## 2. Competitive Landscape
+
+In Day 3 of the technical sprint, we benchmarked existing open-source RAG evaluation and diagnostic tools against our 122 validated controlled failure cases ([`benchmarks/results.md`](benchmarks/results.md)):
+
+* **What existing tools do**: Frameworks like Ragas, TruLens, and DeepEval compute continuous quality metrics (e.g., `context_recall`, `faithfulness`, `answer_relevance`) via LLM-as-a-judge. Vector-specific tools like PyVectorHound compute embedding space geometry (isotropy, MRR).
+* **What they don't do**:
+  * **Top-K Blindness**: Metric evaluators only inspect the final prompt context window. When an item falls outside top-k, they universally report a "retrieval failure", resulting in **0% recall on ranking truncation (`ranking_miss`)** and misdiagnosing 100% of ranking failures as retrieval misses.
+  * **Component Blindness**: Vector diagnostics evaluate only the vector index, remaining completely blind to generation failures and hallucinations.
+  * **Universal Abstention Blindspot**: Zero existing tools evaluate whether an LLM properly abstained on unanswerable questions (`should_abstain`).
+* **Why RAGmortem exists**: To move from *scoring symptoms* (continuous numbers) to *diagnosing root causes* (discrete, counterfactually verified fault attribution).
+* **Benchmark Status**: Across 122 controlled failure cases, existing tools achieve $\le 49.2\%$ overall diagnostic accuracy. Full comparative metrics and confusion matrices are documented in [`benchmarks/results.md`](benchmarks/results.md).
+* **Known Limitations**: Competitor predictions were benchmarked against their documented decision boundaries because Ragas installation timed out due to heavy dependencies, and PyVectorHound's PyPI release currently contains a corrupted wheel.
+
+---
+
+## 3. Current v0.1 Scope
+
 
 Day 1 establishes the runnable foundation:
 - **Core Data Types**: Lightweight dataclasses (`Chunk`, `RagResult`) preserving chunk IDs, rankings, scores, and metadata.
