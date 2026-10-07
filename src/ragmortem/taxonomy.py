@@ -12,6 +12,7 @@ class FailureType(str, Enum):
     RANKING_MISS = "ranking_miss"
     GENERATION_IGNORED_CONTEXT = "generation_ignored_context"
     SHOULD_ABSTAIN = "should_abstain"
+    UNKNOWN = "unknown"
     NO_FAILURE = "no_failure"
 
     @property
@@ -29,8 +30,12 @@ class FailureType(str, Enum):
             FailureType.SHOULD_ABSTAIN: (
                 "The question is unanswerable from the corpus, but the system generated an answer anyway."
             ),
+            FailureType.UNKNOWN: (
+                "Insufficient evidence or ambiguous signals to determine root cause."
+            ),
             FailureType.NO_FAILURE: (
                 "No failure detected; answer was generated correctly from retrieved evidence."
             ),
         }
         return descriptions.get(self, "Unknown failure mode.")
+

@@ -188,9 +188,17 @@ class ReferenceRagApp(RagAdapter):
         # Return deterministic mock response referencing the top chunk
         return f"[Mock Answer based on {top_chunk.id}]: {top_chunk.text}"
 
-    def query(self, question: str) -> RagResult:
+    def query(self, question: str, candidate_k: int | None = None) -> RagResult:
         """Run the end-to-end RAG pipeline and return a RagResult."""
-        retrieved_chunks, scores = self.retrieve(question, k=self.top_k)
+        if candidate_k and candidate_k > self.top_k:
+            candidate_chunks, candidate_scores = self.retrieve(question, k=candidate_k)
+            retrieved_chunks = candidate_chunks[: self.top_k]
+            scores = candidate_scores[: self.top_k]
+        else:
+            retrieved_chunks, scores = self.retrieve(question, k=self.top_k)
+            candidate_chunks = retrieved_chunks
+            candidate_scores = scores
+
         prompt = self.build_prompt(question, retrieved_chunks)
 
         active_model = f"mock:{self.embedding_model_name}" if self.mock_mode else self.groq_model_name
@@ -208,6 +216,8 @@ class ReferenceRagApp(RagAdapter):
                 answer=cached_response,
                 retrieved_chunks=retrieved_chunks,
                 scores=scores,
+                candidate_chunks=candidate_chunks,
+                candidate_scores=candidate_scores,
                 model=active_model,
                 metadata={"cached": True, "cache_key": cache_key},
             )
@@ -233,6 +243,9 @@ class ReferenceRagApp(RagAdapter):
             answer=answer,
             retrieved_chunks=retrieved_chunks,
             scores=scores,
+            candidate_chunks=candidate_chunks,
+            candidate_scores=candidate_scores,
             model=active_model,
             metadata={"cached": False, "cache_key": cache_key},
         )
+

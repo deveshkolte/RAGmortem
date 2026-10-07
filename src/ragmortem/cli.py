@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 from pathlib import Path
 from typing import Sequence
@@ -233,6 +234,150 @@ def cmd_validate_faults(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_diagnose(args: argparse.Namespace) -> int:
+    """Diagnose root cause of failure for a single execution trace or a dataset of traces."""
+    input_path = Path(args.input)
+    corpus_dir = Path(args.corpus)
+
+    if not input_path.exists():
+        print(f"Error: Input file '{input_path}' does not exist.", file=sys.stderr)
+        return 1
+    if not corpus_dir.exists():
+        print(f"Error: Corpus directory '{corpus_dir}' does not exist.", file=sys.stderr)
+        return 1
+
+    from ragmortem.diagnose import ExecutionTrace, RAGDiagnoser
+
+    app = ReferenceRagApp(corpus_dir=corpus_dir, mock_mode=True)
+    diagnoser = RAGDiagnoser(app=app)
+
+    raw_items: list[dict[str, Any]] = []
+    with open(input_path, "r", encoding="utf-8") as f:
+        content = f.read().strip()
+        if content.startswith("{") and "\n{" not in content:
+            raw_items.append(json.loads(content))
+        else:
+            for line in content.splitlines():
+                line = line.strip()
+                if line:
+                    raw_items.append(json.loads(line))
+
+    print("=" * 70)
+    print("RAGmortem Failure Diagnoser")
+    print(f"Target: {input_path} ({len(raw_items)} trace(s))")
+    print(f"Corpus: {corpus_dir}")
+    print("=" * 70)
+
+    for i, item in enumerate(raw_items, start=1):
+        if "fault" in item or "fault_type" in item:
+            from ragmortem.faults.models import InjectedFaultCase
+
+            case = InjectedFaultCase.from_dict(item)
+            trace = ExecutionTrace.from_injected_case(case)
+        else:
+            trace = ExecutionTrace(
+                question=item.get("question", ""),
+                generated_answer=item.get("generated_answer") or item.get("answer", ""),
+                retrieved_chunk_ids=item.get("retrieved_chunk_ids") or item.get("retrieved_ids", []),
+                candidate_chunk_ids=item.get("candidate_chunk_ids") or item.get("candidate_retrieved_ids"),
+                scores=item.get("scores"),
+                gold_chunk_id=item.get("gold_chunk_id"),
+                gold_answer=item.get("gold_answer"),
+                question_type=item.get("question_type", "answerable"),
+                case_id=item.get("case_id"),
+                metadata=item.get("metadata", {}),
+            )
+
+        diag = diagnoser.diagnose(trace)
+
+        print(f"\n[{i}/{len(raw_items)}] Case: {trace.case_id or 'trace'}")
+        print(f"  Question:         {trace.question}")
+        print(f"  Generated Answer: {trace.generated_answer}")
+        print(f"  Diagnosis:        {diag.diagnosis.value.upper()} (Confidence: {diag.confidence:.2f})")
+        print("  Evidence:")
+        for ev in diag.evidence:
+            print(f"    • {ev}")
+        if diag.oracle_replay_correct is not None:
+            ans_snip = (diag.oracle_answer[:80] + "...") if diag.oracle_answer and len(diag.oracle_answer) > 80 else diag.oracle_answer
+            print(f"  Oracle Replay:    Recovered={diag.oracle_replay_correct} ('{ans_snip}')")
+        if diag.candidate_rank is not None:
+            print(f"  Candidate Rank:   #{diag.candidate_rank} (Pool Size: {diag.candidate_count})")
+        if diag.original_rank is not None:
+            print(f"  Context Rank:     #{diag.original_rank}")
+
+    print("\n" + "=" * 70)
+    print(f"Diagnosis completed for {len(raw_items)} case(s).")
+    print("=" * 70)
+    return 0
+
+
+def cmd_evaluate_diagnoser(args: argparse.Namespace) -> int:
+    """Evaluate diagnoser against the benchmark dataset and write report."""
+    faults_path = Path(args.faults)
+    corpus_dir = Path(args.corpus)
+    output_path = Path(args.output)
+
+    if not faults_path.exists():
+        print(f"Error: Faults file '{faults_path}' does not exist.", file=sys.stderr)
+        return 1
+    if not corpus_dir.exists():
+        print(f"Error: Corpus directory '{corpus_dir}' does not exist.", file=sys.stderr)
+        return 1
+
+    from ragmortem.diagnose import RAGDiagnoser, evaluate_diagnoser_on_dataset
+    from ragmortem.faults.inject import load_injected_faults
+
+    app = ReferenceRagApp(corpus_dir=corpus_dir, mock_mode=True)
+    diagnoser = RAGDiagnoser(app=app)
+    cases = load_injected_faults(faults_path)
+
+    print("=" * 70)
+    print("Evaluating RAGmortem Diagnoser on Benchmark Dataset")
+    print(f"Dataset: {faults_path} ({len(cases)} cases)")
+    print(f"Corpus:  {corpus_dir}")
+    print("=" * 70)
+
+    results = evaluate_diagnoser_on_dataset(cases, diagnoser)
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
+        for rec in results["records"]:
+            f.write(json.dumps(rec) + "\n")
+
+    print(f"\nDiagnoses saved to: {output_path}")
+    print("\nOverall Results:")
+    print(f"  Total Cases:         {results['total_cases']}")
+    print(f"  Correct Diagnoses:   {results['correct_diagnoses']}")
+    print(f"  Incorrect Diagnoses: {results['incorrect_diagnoses']}")
+    print(f"  Unknown Diagnoses:   {results['unknown_diagnoses']}")
+    print(f"  Coverage:            {results['coverage']:.1%}")
+    print(f"  Accuracy:            {results['accuracy']:.1%}")
+
+    print("\nPer-Class Metrics:")
+    print(f"  {'Fault Class':<30} | {'Prec':<7} | {'Recall':<7} | {'F1':<7} | {'Count'}")
+    print("  " + "-" * 62)
+    for cat, metrics in results["per_class"].items():
+        count = metrics["tp"] + metrics["fn"]
+        print(
+            f"  {cat:<30} | {metrics['precision']:<7.3f} | {metrics['recall']:<7.3f} | "
+            f"{metrics['f1']:<7.3f} | {count}"
+        )
+
+    print("\nConfusion Matrix (Rows=Actual, Columns=Predicted):")
+    cols = ["retrieval_miss", "ranking_miss", "generation_ignored_context", "should_abstain", "unknown"]
+    header = f"  {'Actual':<28} | " + " | ".join(f"{c[:10]:>10}" for c in cols)
+    print(header)
+    print("  " + "-" * len(header))
+    for actual in ["retrieval_miss", "ranking_miss", "generation_ignored_context", "should_abstain"]:
+        row = f"  {actual:<28} | " + " | ".join(
+            f"{results['confusion_matrix'][actual].get(pred, 0):>10}" for pred in cols
+        )
+        print(row)
+
+    print("=" * 70)
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """CLI Entrypoint for RAGmortem."""
     parser = argparse.ArgumentParser(
@@ -345,6 +490,42 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Top-k retrieval cut-off (default: 3)",
     )
 
+    # diagnose
+    diag_parser = subparsers.add_parser(
+        "diagnose",
+        help="Diagnose root causes of failure for a RAG execution trace.",
+    )
+    diag_parser.add_argument(
+        "input",
+        help="Path to trace JSON file or JSONL dataset of traces.",
+    )
+    diag_parser.add_argument(
+        "--corpus",
+        default="examples/reference_rag/documents",
+        help="Path to documents directory (default: examples/reference_rag/documents)",
+    )
+
+    # evaluate-diagnoser
+    eval_diag_parser = subparsers.add_parser(
+        "evaluate-diagnoser",
+        help="Evaluate diagnoser accuracy against the injected fault dataset.",
+    )
+    eval_diag_parser.add_argument(
+        "--faults",
+        default="evals/injected_faults.jsonl",
+        help="Path to injected faults JSONL file (default: evals/injected_faults.jsonl)",
+    )
+    eval_diag_parser.add_argument(
+        "--corpus",
+        default="examples/reference_rag/documents",
+        help="Path to documents directory (default: examples/reference_rag/documents)",
+    )
+    eval_diag_parser.add_argument(
+        "--output",
+        default="evals/diagnoses.jsonl",
+        help="Output destination for diagnoses JSONL (default: evals/diagnoses.jsonl)",
+    )
+
     args = parser.parse_args(argv)
 
     if args.command == "validate-dataset":
@@ -355,6 +536,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         return cmd_generate_faults(args)
     elif args.command == "validate-faults":
         return cmd_validate_faults(args)
+    elif args.command == "diagnose":
+        return cmd_diagnose(args)
+    elif args.command == "evaluate-diagnoser":
+        return cmd_evaluate_diagnoser(args)
     return 1
 
 

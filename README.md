@@ -2,24 +2,50 @@
 
 An open-source debugger for Retrieval-Augmented Generation (RAG) applications that isolates why an answer failed — whether due to retrieval miss, ranking miss, generator ignoring context, or failing to abstain.
 
-> **Status: Experimental (v0.1 / Day 1 Foundation)**  
-> RAGmortem is currently an active experimental project focused on controlled failure diagnosis and reproducible counterfactual replay. It is not yet intended for production telemetry or end-user dashboards.
+> **Status: Experimental (v0.1 / Day 4 Core Diagnoser Complete)**  
+> RAGmortem is an active open-source project focused on controlled failure diagnosis and reproducible counterfactual replay. It deterministically isolates root causes across retrieval, ranking, generation, and abstention without requiring an external LLM judge.
 
 ---
 
-## 1. What Problem It Solves
+## 2. Diagnostic Methodology & Workflow
 
-When a RAG system provides an incorrect, incomplete, or hallucinated answer, diagnosing *why* it failed is frequently difficult:
-- Did the retriever fail to locate the required document (Retrieval Miss)?
-- Did the retriever find the chunk, but rank it too low for the context window (Ranking Miss)?
-- Was the evidence present in the prompt, but the LLM hallucinated or ignored it (Generation Ignored Context)?
-- Did the user ask an unanswerable question that the system should have abstained from, but instead fabricated an answer (Should Abstain)?
+When a RAG execution fails, RAGmortem executes a controlled counterfactual replay and rank probing experiment:
 
-RAGmortem provides a systematic, reproducible method to trace and attribute these failures using explicit contracts, deterministic replay, and controlled fault verification.
+```text
+Failed RAG execution
+        ↓
+Inspect retrieval candidates
+        ↓
+Oracle context replay
+        ↓
+Did answer recover?
+     /        \
+   YES        NO
+    ↓          ↓
+Rank probe   Generation
+    ↓        investigation
+Retrieval /
+Ranking
+```
 
----
+> **Note on Methodology**: This represents the current v0.1 methodology, designed to prove explainable, deterministic root-cause attribution rather than a solved universal classifier.
 
-## 2. Competitive Landscape
+### The Diagnostic Algorithm:
+
+1. **Abstention Probe**:
+   - For queries verified as unanswerable from the corpus, inspect if the system produced a substantive answer. If it hallucinated instead of refusing, classify as `should_abstain`.
+2. **Correctness Check**:
+   - If the answer already satisfies the gold criteria, classify as `no_failure`.
+3. **Oracle Context Replay**:
+   - Re-run the question with **only** the gold reference chunk provided in context.
+   - If the answer still fails to satisfy the criteria, classify as `generation_ignored_context`.
+   - If the gold chunk was already present in the prompt context but the model answered incorrectly, classify as `generation_ignored_context`.
+4. **Rank Probing**:
+   - If oracle replay recovers the answer:
+     - If the gold chunk was present in the candidate retrieval pool at a rank $> \text{top-k}$ cutoff, classify as `ranking_miss`.
+     - If the gold chunk was completely absent from the candidate retrieval pool, classify as `retrieval_miss`.
+5. **Unknown Fallback**:
+   - If gold references are missing or unindexed in the corpus, explicitly return `unknown` with human-readable evidence rather than guessing.
 
 In Day 3 of the technical sprint, we benchmarked existing open-source RAG evaluation and diagnostic tools against our 122 validated controlled failure cases ([`benchmarks/results.md`](benchmarks/results.md)):
 
@@ -104,6 +130,20 @@ Verify that all generated cases strictly adhere to their ground-truth failure co
 ragmortem validate-faults
 ```
 
+### Diagnose a RAG Execution Trace
+Run root-cause failure diagnosis on an execution trace (JSON or JSONL):
+
+```bash
+ragmortem diagnose evals/injected_faults.jsonl
+```
+
+### Evaluate Diagnoser Against Full Benchmark Dataset
+Benchmark the deterministic diagnoser against all 122 failure cases and output results:
+
+```bash
+ragmortem evaluate-diagnoser
+```
+
 ---
 
 ## 4. Reference RAG
@@ -182,7 +222,8 @@ RAGmortem
 │       ├── taxonomy.py                # FailureType definitions
 │       ├── cache.py                   # Deterministic ModelCache
 │       ├── dataset.py                 # Loader and validator for evaluation questions
-│       ├── cli.py                     # CLI commands (run-reference, generate-faults, validate-faults)
+│       ├── cli.py                     # CLI commands (run-reference, generate-faults, diagnose, etc.)
+│       ├── diagnose.py                # Deterministic failure diagnoser & rank probe engine
 │       └── faults/                    # Controlled fault injection framework
 │           ├── __init__.py            # Module exports
 │           ├── models.py              # FaultConfig, BaselineExecution, InjectedFaultCase
@@ -195,34 +236,38 @@ RAGmortem
 │       └── documents/                 # Reference technical policy corpus
 ├── evals/
 │   ├── questions.jsonl                # 38 evaluation questions
-│   └── injected_faults.jsonl          # 122 validated synthetic failure cases
-└── tests/                             # Full test suite (24 tests, 100% offline runnable)
+│   ├── injected_faults.jsonl          # 122 validated synthetic failure cases
+│   ├── diagnoses.jsonl                # 122 audit records from diagnoser evaluation
+│   └── diagnoser_results.md           # Day 4 diagnostic benchmark report
+└── tests/                             # Full test suite (36 tests, 100% offline runnable)
     ├── test_types.py
     ├── test_adapter.py
     ├── test_cache.py
     ├── test_dataset_validation.py
     ├── test_mock_rag.py
     ├── test_retrieval.py
-    └── test_faults.py
+    ├── test_faults.py
+    ├── test_benchmark.py
+    └── test_diagnoser.py
 ```
 
 ---
 
 ## 8. Current Limitations
 
-- **Single-hop factual focus**: v0.1 supports single-chunk answerable questions. Multi-hop and temporal reasoning queries are out of scope.
-- **In-memory Vector Store**: Designed for small reference corpora (<10,000 chunks) using NumPy rather than distributed vector databases.
-- **Offline Judge**: Day 2 uses deterministic token/sequence matching; full counterfactual replay and LLM judge are slated for Days 3–5.
+- **Single-hop factual focus**: v0.1 supports single-chunk answerable questions. Multi-hop composite evidence queries require extending oracle replay to multi-chunk combinations.
+- **In-memory Vector Store**: Designed for local reference corpora (<10,000 chunks) using NumPy rather than distributed vector databases.
+- **Candidate Pool Access Requirement**: Discerning ranking misses from retrieval misses requires observing the candidate retrieval pool prior to prompt top-k cutoff.
 
 ---
 
 ## 9. Roadmap
 
-- **Day 1**: Runnable foundation, core types, reference RAG, caching, 38 evaluation questions.
-- **Day 2**: Controlled fault-injection framework, 4 failure modes, 122 validated failure cases.
-- **Day 3**: Counterfactual replay engine (swapping retrieved chunks to isolate cause).
-- **Day 4**: Failure diagnostic judge & attribution scoring.
-- **Day 5**: Automated fix recommendations and context patch analysis.
+- **Day 1**: Runnable foundation, core types, reference RAG, caching, 38 evaluation questions. [DONE]
+- **Day 2**: Controlled fault-injection framework, 4 failure modes, 122 validated failure cases. [DONE]
+- **Day 3**: Competitor benchmark & reality check (Ragas, TruLens, DeepEval, Phoenix). [DONE]
+- **Day 4**: Core deterministic failure diagnoser via oracle replay & rank probing (100% accuracy on 122 cases). [DONE]
+- **Day 5**: Automated fix recommendations, context patch analysis, & developer tracing integration.
 - **Day 6**: End-to-end failure suite evaluation across model families.
 - **Day 7**: CLI polish, benchmarking summary, and release documentation.
 
