@@ -11,9 +11,11 @@ from __future__ import annotations
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Sequence, TYPE_CHECKING
 
-from examples.reference_rag.app import ReferenceRagApp
+if TYPE_CHECKING:
+    from examples.reference_rag.app import ReferenceRagApp
+
 from ragmortem.faults.eval import is_abstaining, is_answer_correct
 from ragmortem.faults.models import InjectedFaultCase
 from ragmortem.taxonomy import FailureType
@@ -155,13 +157,58 @@ class ExecutionTrace:
         )
 
 
+from enum import Enum
+
+
+class TelemetryCompleteness(str, Enum):
+    """Assessment of telemetry field completeness in an execution trace."""
+
+    COMPLETE = "COMPLETE"
+    PARTIAL = "PARTIAL"
+    INSUFFICIENT = "INSUFFICIENT"
+
+
+@dataclass
+class EvidenceModel:
+    """Structured, measurable evidence signals underlying a diagnosis.
+
+    These are deterministic measurements and heuristics, NOT calibrated probabilities.
+    """
+
+    retrieval_strength: float = 0.0
+    ranking_strength: float = 0.0
+    generation_support: float = 0.0
+    answerability_signal: float = 0.0
+    telemetry_completeness: TelemetryCompleteness = TelemetryCompleteness.COMPLETE
+    ambiguity: float = 0.0
+    reasons: list[str] = field(default_factory=list)
+    limitations: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "retrieval_strength": round(self.retrieval_strength, 4),
+            "ranking_strength": round(self.ranking_strength, 4),
+            "generation_support": round(self.generation_support, 4),
+            "answerability_signal": round(self.answerability_signal, 4),
+            "telemetry_completeness": self.telemetry_completeness.value,
+            "ambiguity": round(self.ambiguity, 4),
+            "reasons": list(self.reasons),
+            "limitations": list(self.limitations),
+        }
+
+
 @dataclass
 class DiagnosticResult:
-    """The structured diagnosis and evidence produced by RAGmortem."""
+    """The structured diagnosis, evidence score, and reasoning produced by RAGmortem."""
 
     diagnosis: FailureType
-    confidence: float
     evidence: list[str]
+    evidence_score: float = 0.0
+    confidence: float = 0.0  # Kept as alias to evidence_score for backward compatibility
+    evidence_model: EvidenceModel | None = None
+    reasons: list[str] = field(default_factory=list)
+    limitations: list[str] = field(default_factory=list)
+    telemetry_completeness: str = "COMPLETE"
     mode: str = "observed"
     is_suspected: bool = False
     original_rank: int | None = None
@@ -172,12 +219,23 @@ class DiagnosticResult:
     signals: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
 
+    def __post_init__(self) -> None:
+        if self.confidence == 0.0 and self.evidence_score != 0.0:
+            self.confidence = self.evidence_score
+        elif self.evidence_score == 0.0 and self.confidence != 0.0:
+            self.evidence_score = self.confidence
+
     def to_dict(self) -> dict[str, Any]:
         return {
             "diagnosis": self.diagnosis.value,
             "canonical_diagnosis": self.diagnosis.canonical.value,
+            "evidence_score": round(self.evidence_score, 4),
             "confidence": round(self.confidence, 4),
             "evidence": list(self.evidence),
+            "reasons": list(self.reasons),
+            "limitations": list(self.limitations),
+            "telemetry_completeness": self.telemetry_completeness,
+            "evidence_model": self.evidence_model.to_dict() if self.evidence_model else None,
             "mode": self.mode,
             "is_suspected": self.is_suspected,
             "original_rank": self.original_rank,
@@ -191,10 +249,15 @@ class DiagnosticResult:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DiagnosticResult:
+        ev_score = float(data.get("evidence_score", data.get("confidence", 0.0)))
         return cls(
             diagnosis=FailureType(data["diagnosis"]),
-            confidence=float(data.get("confidence", 1.0)),
+            evidence_score=ev_score,
+            confidence=float(data.get("confidence", ev_score)),
             evidence=list(data.get("evidence", [])),
+            reasons=list(data.get("reasons", [])),
+            limitations=list(data.get("limitations", [])),
+            telemetry_completeness=str(data.get("telemetry_completeness", "COMPLETE")),
             mode=str(data.get("mode", "observed")),
             is_suspected=bool(data.get("is_suspected", False)),
             original_rank=data.get("original_rank"),
@@ -208,10 +271,10 @@ class DiagnosticResult:
 
 
 class RAGDiagnoser:
-    """Failure diagnostic engine for RAG applications.
+    """Uncertainty-aware failure diagnostic engine for RAG applications.
 
     Provides three diagnosis interfaces:
-    - diagnose_observed: Evaluates purely observable telemetry (production default).
+    - diagnose_observed: Evaluates observable telemetry without gold labels.
     - diagnose_reference_assisted: Uses developer expected answer without gold chunk ID.
     - diagnose_oracle: Controlled research upper bound using counterfactual replay.
     """
@@ -220,191 +283,359 @@ class RAGDiagnoser:
         self,
         app: ReferenceRagApp | None = None,
         corpus_chunks: list[Chunk] | None = None,
+        score_margin_threshold: float = 0.05,
+        ambiguity_band: tuple[float, float] = (0.47, 0.53),
+        model_name: str = "all-MiniLM-L6-v2",
     ) -> None:
-        if app is not None:
-            self.app = app
-        else:
-            self.app = ReferenceRagApp(mock_mode=True)
+        self.app = app
+        self.score_margin_threshold = score_margin_threshold
+        self.ambiguity_band = ambiguity_band
+        self.model_name = model_name
 
         if corpus_chunks is not None:
             self.chunks_by_id = {c.id: c for c in corpus_chunks}
-        else:
+        elif self.app is not None and hasattr(self.app, "chunks"):
             self.chunks_by_id = {c.id: c for c in self.app.chunks}
+        else:
+            self.chunks_by_id = {}
 
     # =========================================================================
-    # 1. REALISTIC OBSERVATIONAL MODE (Day 5 Default)
+    # 1. REALISTIC OBSERVATIONAL MODE (Uncertainty-Aware)
     # =========================================================================
 
-    def diagnose_observed(self, trace: ObservedExecution) -> DiagnosticResult:
+    def diagnose_observed(
+        self,
+        trace: ObservedExecution,
+        mode: str = "auto",
+        corpus: Any | None = None,
+    ) -> DiagnosticResult:
         """Diagnose root cause using ONLY observable execution telemetry without gold labels.
 
-        Never accesses fault_type, gold_chunk_id, or gold_answer.
+        Treats UNKNOWN as a first-class result whenever evidence is missing, conflicting,
+        or insufficient to disambiguate causes.
         """
         evidence: list[str] = []
+        reasons: list[str] = []
+        limitations: list[str] = []
         signals: dict[str, Any] = {}
 
-        # Signal 1: Answer abstention inspection
+        # -------------------------------------------------------------
+        # 1. Telemetry Completeness Validation
+        # -------------------------------------------------------------
+        if not trace.question or not trace.question.strip():
+            return DiagnosticResult(
+                diagnosis=FailureType.UNKNOWN,
+                evidence_score=0.0,
+                evidence=["Trace query/question is empty or missing."],
+                reasons=["Insufficient telemetry: Missing user query."],
+                telemetry_completeness=TelemetryCompleteness.INSUFFICIENT.value,
+                mode=mode,
+                signals=signals,
+            )
+
+        if not trace.generated_answer or not trace.generated_answer.strip():
+            return DiagnosticResult(
+                diagnosis=FailureType.UNKNOWN,
+                evidence_score=0.0,
+                evidence=["Generated answer is empty or missing from trace."],
+                reasons=["Insufficient telemetry: Missing generated answer payload."],
+                telemetry_completeness=TelemetryCompleteness.INSUFFICIENT.value,
+                mode=mode,
+                signals=signals,
+            )
+
+        if not trace.retrieved_chunk_ids:
+            return DiagnosticResult(
+                diagnosis=FailureType.UNKNOWN,
+                evidence_score=0.0,
+                evidence=["Retrieved chunk list is empty (no context supplied to generator)."],
+                reasons=["Insufficient telemetry: Empty context window in trace."],
+                telemetry_completeness=TelemetryCompleteness.INSUFFICIENT.value,
+                mode=mode,
+                signals=signals,
+            )
+
+        if trace.scores is None or len(trace.scores) == 0:
+            return DiagnosticResult(
+                diagnosis=FailureType.UNKNOWN,
+                evidence_score=0.0,
+                evidence=["Retrieval scores are missing from execution telemetry."],
+                reasons=["Insufficient telemetry: Missing similarity scores; cannot evaluate retrieval relevance."],
+                telemetry_completeness=TelemetryCompleteness.INSUFFICIENT.value,
+                mode=mode,
+                signals=signals,
+            )
+
+        completeness = (
+            TelemetryCompleteness.COMPLETE
+            if trace.candidate_chunk_ids is not None
+            else TelemetryCompleteness.PARTIAL
+        )
+        if completeness == TelemetryCompleteness.PARTIAL:
+            limitations.append("Candidate pool prior to top-k truncation was not logged in trace.")
+
+        # -------------------------------------------------------------
+        # 2. Extract Relative Telemetry Signals
+        # -------------------------------------------------------------
+        scores = trace.scores
+        top_score = scores[0]
+        last_score = scores[-1]
+        score_spread = top_score - last_score if len(scores) > 1 else 0.0
+
+        signals["top_score"] = top_score
+        signals["score_spread"] = score_spread
+        signals["telemetry_completeness"] = completeness.value
+
         is_refusal = is_abstaining(trace.generated_answer)
         signals["is_refusal"] = is_refusal
 
-        # Signal 2: Score telemetry
-        scores = trace.scores or []
-        top_score = scores[0] if scores else None
-        signals["top_score"] = top_score
-
-        top_k = trace.top_k
         cand_ids = trace.candidate_chunk_ids
+        top_k = trace.top_k
         cand_count = len(cand_ids) if cand_ids else len(trace.retrieved_chunk_ids)
         signals["candidate_count"] = cand_count
-
         has_extended_candidates = bool(cand_ids and len(cand_ids) > top_k)
         signals["has_extended_candidates"] = has_extended_candidates
 
-        # Signal 3: Corpus search audit (if corpus index is accessible)
-        clean_corpus_score = None
-        clean_corpus_top_id = None
-        if self.app is not None and hasattr(self.app, "retrieve"):
-            try:
-                ret_chunks, ret_scores = self.app.retrieve(trace.question, k=1)
-                if ret_scores:
-                    clean_corpus_score = float(ret_scores[0])
-                    clean_corpus_top_id = ret_chunks[0].id
-            except Exception:
-                pass
-        signals["clean_corpus_score"] = clean_corpus_score
-        signals["clean_corpus_top_id"] = clean_corpus_top_id
-
-        # --- DIAGNOSTIC REASONING ---
-
-        # PATH A: System generated a refusal/abstention
+        # -------------------------------------------------------------
+        # 3. Path A: System generated a refusal/abstention
+        # -------------------------------------------------------------
         if is_refusal:
-            if top_score is not None and top_score >= 0.55:
+            # False refusal check: context score is strong
+            if top_score >= 0.54 or (top_score >= 0.50 and score_spread >= 0.10):
                 evidence.append(
                     f"Model abstained from answering despite high retrieval score (top score: {top_score:.3f})."
                 )
-                evidence.append(
-                    "Root cause (suspected): Generator failed to extract answers from provided context (false refusal)."
-                )
+                evidence.append("Context contained salient information, but generator produced a refusal.")
+                reasons.append("Generator false refusal: Abstention emitted despite relevant context.")
+                ev_score = round(min(0.95, float(top_score)), 4)
                 return DiagnosticResult(
                     diagnosis=FailureType.GENERATION_SUSPECTED,
-                    confidence=0.75,
+                    evidence_score=ev_score,
                     evidence=evidence,
-                    mode="observed",
+                    reasons=reasons,
+                    limitations=limitations,
+                    telemetry_completeness=completeness.value,
+                    mode=mode,
                     is_suspected=True,
                     signals=signals,
                 )
             else:
-                evidence.append("System correctly abstained: generated refusal matches low/moderate retrieval relevance.")
+                evidence.append("System correctly abstained: generated refusal matches low retrieval relevance.")
+                reasons.append("Appropriate abstention: Query has weak support and system refused.")
                 return DiagnosticResult(
                     diagnosis=FailureType.NO_FAILURE,
-                    confidence=0.90,
+                    evidence_score=0.90,
                     evidence=evidence,
-                    mode="observed",
+                    reasons=reasons,
+                    limitations=limitations,
+                    telemetry_completeness=completeness.value,
+                    mode=mode,
                     is_suspected=False,
                     signals=signals,
                 )
 
-        # PATH B: Substantive response generated. Evaluate ranking vs generation vs retrieval vs abstention.
+        # -------------------------------------------------------------
+        # 4. Path B: Substantive response generated
+        # -------------------------------------------------------------
 
-        # Signal 1: Ranking Cutoff Probe
-        # Candidates exist outside top-k and top-k retrieval was strong
-        if has_extended_candidates and (top_score is None or top_score >= 0.55):
-            evidence.append(
-                f"Candidate retrieval pool contained {cand_count} chunks, but context window was truncated to top-{top_k}."
-            )
-            evidence.append("Strong candidates were cut off by ranking threshold.")
-            evidence.append(
-                "Root cause (suspected): Candidate retrieval succeeded, but ranking truncation omitted relevant evidence."
-            )
-            return DiagnosticResult(
-                diagnosis=FailureType.RANKING_SUSPECTED,
-                confidence=0.85,
-                evidence=evidence,
-                mode="observed",
-                is_suspected=True,
-                candidate_count=cand_count,
-                signals=signals,
-            )
-
-        # Signal 2: Generation Failure Probe
-        # High retrieval score in the trace context, but answer failed
-        if top_score is not None and top_score >= 0.50:
-            evidence.append(
-                f"Retrieved context had high relevance score to question (top score: {top_score:.3f})."
-            )
-            evidence.append(
-                "Context was directly supplied in top-k prompt window, but generated answer appears ungrounded or contradictory."
-            )
-            evidence.append(
-                "Root cause (suspected): Generator failed to incorporate supplied context evidence."
-            )
-            return DiagnosticResult(
-                diagnosis=FailureType.GENERATION_SUSPECTED,
-                confidence=0.80,
-                evidence=evidence,
-                mode="observed",
-                is_suspected=True,
-                signals=signals,
-            )
-
-        # Signal 3: Weak retrieval scores in trace
-        # Distinguish retrieval miss (corpus has info) from unanswerable question (corpus lacks info)
-        score_str = f"{top_score:.3f}" if top_score is not None else "low"
-        if clean_corpus_score is not None:
-            if clean_corpus_score >= 0.48:
-                evidence.append(
-                    f"Retriever returned low-relevance chunks (top score: {score_str})."
-                )
-                evidence.append(
-                    f"Corpus audit shows indexed documents exist with high semantic relevance to question (clean score: {clean_corpus_score:.3f})."
-                )
-                evidence.append(
-                    "Root cause (suspected): Retriever failed to locate relevant documents present in the corpus."
-                )
-                return DiagnosticResult(
-                    diagnosis=FailureType.RETRIEVAL_SUSPECTED,
-                    confidence=0.85,
-                    evidence=evidence,
-                    mode="observed",
-                    is_suspected=True,
-                    signals=signals,
-                )
+        # Check 1: Ranking Cutoff Probe
+        if has_extended_candidates:
+            cand_scores = trace.candidate_scores
+            if cand_scores and len(cand_scores) > top_k:
+                cutoff_gap = cand_scores[top_k - 1] - cand_scores[top_k]
             else:
+                cutoff_gap = 0.01
+
+            signals["cutoff_gap"] = cutoff_gap
+
+            if top_score >= 0.50 and cutoff_gap <= 0.08:
                 evidence.append(
-                    f"Retriever returned low-relevance chunks (top score: {score_str})."
+                    f"Candidate retrieval pool contained {cand_count} chunks, truncated to top-{top_k}."
                 )
                 evidence.append(
-                    f"Corpus audit confirms no documents in the index match the question (maximum corpus score: {clean_corpus_score:.3f})."
+                    f"Strong candidate exists immediately below cutoff (score gap: {cutoff_gap:.4f} <= 0.08)."
                 )
-                evidence.append(
-                    "System produced a substantive answer when the corpus contains no supporting evidence."
-                )
-                evidence.append(
-                    "Root cause (suspected): Unanswerable question from corpus; system hallucinated when it should have abstained."
-                )
+                evidence.append("Root cause (suspected): Candidate retrieval succeeded, but ranking omitted evidence.")
+                reasons.append("Ranking cutoff: Viable candidate demoted below top-k context window.")
+                ev_score = round(max(0.70, min(0.95, 0.92 - cutoff_gap)), 4)
                 return DiagnosticResult(
-                    diagnosis=FailureType.ABSTENTION_SUSPECTED,
-                    confidence=0.85,
+                    diagnosis=FailureType.RANKING_SUSPECTED,
+                    evidence_score=ev_score,
                     evidence=evidence,
-                    mode="observed",
+                    reasons=reasons,
+                    limitations=limitations,
+                    telemetry_completeness=completeness.value,
+                    mode=mode,
                     is_suspected=True,
+                    candidate_count=cand_count,
                     signals=signals,
                 )
-        else:
-            # Without corpus index access, weak scores cannot distinguish retrieval miss from unanswerable query
+            elif top_score < 0.47:
+                # Conflicting signals: candidate truncation coincides with very low scores
+                evidence.append(
+                    f"Candidate pool has {cand_count} items, but retrieval scores are very low (top: {top_score:.3f})."
+                )
+                reasons.append("Multiple plausible causes: Conflicting ranking truncation and low retrieval relevance.")
+                return DiagnosticResult(
+                    diagnosis=FailureType.UNKNOWN,
+                    evidence_score=0.0,
+                    evidence=evidence,
+                    reasons=reasons,
+                    limitations=limitations,
+                    telemetry_completeness=completeness.value,
+                    mode=mode,
+                    signals=signals,
+                )
+
+        # Check 2: Borderline Ambiguity Range Check
+        low_bound, high_bound = self.ambiguity_band
+        if low_bound <= top_score <= high_bound:
             evidence.append(
-                f"Retriever returned low-relevance chunks (top score: {top_score if top_score is not None else 'unknown'})."
+                f"Retrieved context top score ({top_score:.3f}) lies in ambiguity band [{low_bound}, {high_bound}]."
             )
-            evidence.append(
-                "Without access to the corpus index, cannot determine whether retriever missed existing documents or question is unanswerable."
-            )
-            evidence.append("Root cause: Insufficient evidence to disambiguate retrieval miss from abstention failure.")
+            evidence.append("Without ground truth or reference answer, cannot distinguish distractor noise from generation failure.")
+            reasons.append("Ambiguous retrieval evidence: Score near decision boundary lacks clear signal separation.")
             return DiagnosticResult(
                 diagnosis=FailureType.UNKNOWN,
-                confidence=0.0,
+                evidence_score=0.0,
                 evidence=evidence,
-                mode="observed",
-                is_suspected=False,
+                reasons=reasons,
+                limitations=limitations + ["No reference answer supplied to disambiguate borderline context relevance."],
+                telemetry_completeness=completeness.value,
+                mode=mode,
+                signals=signals,
+            )
+
+        # Check 3: High Relevance Context Probe (Generator Ignored Evidence)
+        if top_score > high_bound:
+            evidence.append(
+                f"Retrieved context had high relevance score to question (top score: {top_score:.3f} > {high_bound})."
+            )
+            evidence.append("Context was directly supplied in top-k prompt window, but answer failed or contradicts facts.")
+            reasons.append("Generation failure: High-relevance context supplied but generator failed to extract correct facts.")
+            ev_score = round(min(0.95, 0.72 + (top_score - high_bound) * 0.5), 4)
+            return DiagnosticResult(
+                diagnosis=FailureType.GENERATION_SUSPECTED,
+                evidence_score=ev_score,
+                evidence=evidence,
+                reasons=reasons,
+                limitations=limitations,
+                telemetry_completeness=completeness.value,
+                mode=mode,
+                is_suspected=True,
+                signals=signals,
+            )
+
+        # Check 4: Low Retrieval Relevance Probe (top_score < low_bound)
+        # Distinguish retrieval miss from unanswerable question
+        target_app = corpus if corpus is not None else self.app
+        if mode == "trace_only":
+            use_corpus = False
+        elif mode == "corpus_aware":
+            if target_app is None:
+                evidence.append("Corpus-aware mode requested, but no corpus index was provided.")
+                reasons.append("Missing corpus access when corpus evidence is required for diagnosis.")
+                limitations.append("Corpus index unavailable.")
+                return DiagnosticResult(
+                    diagnosis=FailureType.UNKNOWN,
+                    evidence_score=0.0,
+                    evidence=evidence,
+                    reasons=reasons,
+                    limitations=limitations,
+                    telemetry_completeness=completeness.value,
+                    mode="corpus_aware",
+                    signals=signals,
+                )
+            use_corpus = True
+        else:
+            use_corpus = (target_app is not None and hasattr(target_app, "retrieve"))
+
+        if not use_corpus:
+            evidence.append(
+                f"Retriever returned low-relevance chunks (top score: {top_score:.3f} < {low_bound})."
+            )
+            evidence.append(
+                "Trace-only mode: Without access to the corpus index, cannot determine whether retriever missed documents or question is unanswerable."
+            )
+            reasons.append("Insufficient evidence to disambiguate retrieval miss from abstention failure without corpus access.")
+            limitations.append("Corpus index unavailable in trace-only mode.")
+            return DiagnosticResult(
+                diagnosis=FailureType.UNKNOWN,
+                evidence_score=0.0,
+                evidence=evidence,
+                reasons=reasons,
+                limitations=limitations,
+                telemetry_completeness=completeness.value,
+                mode="trace_only",
+                signals=signals,
+            )
+
+        # Corpus-aware audit
+        try:
+            ret_chunks, ret_scores = target_app.retrieve(trace.question, k=3)
+        except Exception:
+            ret_chunks, ret_scores = [], []
+
+        clean_top = float(ret_scores[0]) if ret_scores else 0.0
+        clean_gap = float(ret_scores[0] - ret_scores[2]) if len(ret_scores) >= 3 else 0.0
+        signals["clean_corpus_score"] = clean_top
+        signals["clean_corpus_gap"] = clean_gap
+
+        if clean_top >= 0.45 or (clean_top >= 0.28 and clean_gap >= 0.06):
+            evidence.append(
+                f"Retriever returned low-relevance chunks at runtime (top score: {top_score:.3f})."
+            )
+            evidence.append(
+                f"Corpus audit shows indexed documents exist with distinct semantic relevance (clean score: {clean_top:.3f}, gap: {clean_gap:.3f})."
+            )
+            evidence.append("Root cause (suspected): Retriever failed to locate relevant documents present in the corpus.")
+            reasons.append("Retrieval miss: Relevant evidence exists in corpus but was omitted from retrieved context.")
+            ev_score = round(min(0.95, 0.75 + min(0.20, clean_gap)), 4)
+            return DiagnosticResult(
+                diagnosis=FailureType.RETRIEVAL_SUSPECTED,
+                evidence_score=ev_score,
+                evidence=evidence,
+                reasons=reasons,
+                limitations=limitations,
+                telemetry_completeness=completeness.value,
+                mode="corpus_aware",
+                is_suspected=True,
+                signals=signals,
+            )
+        elif clean_top < 0.42 and clean_gap < 0.05:
+            evidence.append(
+                f"Retriever returned low-relevance chunks (top score: {top_score:.3f})."
+            )
+            evidence.append(
+                f"Corpus audit confirms no documents in the index match the question (maximum score: {clean_top:.3f}, flat gap: {clean_gap:.3f})."
+            )
+            evidence.append("System produced a substantive answer when the corpus contains no supporting evidence.")
+            reasons.append("Abstention failure: Unanswerable query from corpus; system hallucinated when it should have abstained.")
+            ev_score = round(min(0.95, 0.75 + max(0.0, 0.42 - clean_top)), 4)
+            return DiagnosticResult(
+                diagnosis=FailureType.ABSTENTION_SUSPECTED,
+                evidence_score=ev_score,
+                evidence=evidence,
+                reasons=reasons,
+                limitations=limitations,
+                telemetry_completeness=completeness.value,
+                mode="corpus_aware",
+                is_suspected=True,
+                signals=signals,
+            )
+        else:
+            evidence.append(
+                f"Corpus audit yielded borderline score separation (clean top: {clean_top:.3f}, gap: {clean_gap:.3f})."
+            )
+            reasons.append("Ambiguous answerability: Cannot definitively confirm whether corpus supports this query.")
+            return DiagnosticResult(
+                diagnosis=FailureType.UNKNOWN,
+                evidence_score=0.0,
+                evidence=evidence,
+                reasons=reasons,
+                limitations=limitations,
+                telemetry_completeness=completeness.value,
+                mode="corpus_aware",
                 signals=signals,
             )
 
@@ -734,11 +965,22 @@ class RAGDiagnoser:
 
     def diagnose(
         self,
-        trace: ExecutionTrace | ObservedExecution,
+        trace: ExecutionTrace | ObservedExecution | dict[str, Any],
         mode: str | None = None,
+        corpus: Any | None = None,
         reference_answer: str | None = None,
     ) -> DiagnosticResult:
-        """Unified entrypoint for failure diagnosis."""
+        """Unified entrypoint for failure diagnosis.
+        
+        Supports explicit modes:
+        - mode="trace_only": Diagnoses strictly using trace telemetry; never touches corpus.
+        - mode="corpus_aware": Validates against corpus index (requires corpus or diagnoser.app).
+        - mode="reference_assisted": Validates using user-supplied reference answer.
+        - mode="oracle": Uses benchmark gold metadata (research upper bound).
+        """
+        if isinstance(trace, dict):
+            trace = ObservedExecution.from_dict(trace)
+
         if mode == "oracle" or (mode is None and isinstance(trace, ExecutionTrace)):
             if isinstance(trace, ExecutionTrace):
                 return self.diagnose_oracle(trace)
@@ -759,12 +1001,30 @@ class RAGDiagnoser:
         else:
             obs_trace = trace
 
-        return self.diagnose_observed(obs_trace)
+        effective_mode = mode or ("corpus_aware" if (corpus is not None or self.app is not None) else "trace_only")
+        return self.diagnose_observed(obs_trace, mode=effective_mode, corpus=corpus)
+
+
+def diagnose(
+    trace: ExecutionTrace | ObservedExecution | dict[str, Any],
+    corpus: Any | None = None,
+    mode: str | None = None,
+    reference_answer: str | None = None,
+) -> DiagnosticResult:
+    """Convenience functional API for RAG failure diagnosis."""
+    diagnoser = RAGDiagnoser(app=corpus)
+    return diagnoser.diagnose(
+        trace=trace,
+        mode=mode,
+        corpus=corpus,
+        reference_answer=reference_answer,
+    )
 
 
 def evaluate_observed_on_dataset(
     cases: Sequence[InjectedFaultCase],
     diagnoser: RAGDiagnoser,
+    mode: str = "auto",
 ) -> dict[str, Any]:
     """Run observational diagnoser over benchmark cases without exposing any labels to the engine."""
     records: list[dict[str, Any]] = []
@@ -773,29 +1033,40 @@ def evaluate_observed_on_dataset(
         FailureType.RANKING_MISS.value,
         FailureType.GENERATION_IGNORED_CONTEXT.value,
         FailureType.SHOULD_ABSTAIN.value,
+        FailureType.UNKNOWN.value,
     ]
 
     confusion_matrix: dict[str, dict[str, int]] = {
-        gt: {pred: 0 for pred in categories + [FailureType.UNKNOWN.value, FailureType.NO_FAILURE.value]}
+        gt: {pred: 0 for pred in categories + [FailureType.NO_FAILURE.value]}
         for gt in categories
     }
 
     correct_count = 0
-    unknown_count = 0
+    resolved_total = 0
+    resolved_correct = 0
+    unknown_diagnoses = 0
     total = len(cases)
 
     for case in cases:
         obs_trace = ObservedExecution.from_injected_case(case)
-        diag_res = diagnoser.diagnose_observed(obs_trace)
+        diag_res = diagnoser.diagnose_observed(obs_trace, mode=mode)
 
         gt_str = case.fault_type
-        pred_str = diag_res.diagnosis.canonical.value
+        pred_canonical = diag_res.diagnosis.canonical.value
+        pred_str = pred_canonical if pred_canonical in categories else FailureType.UNKNOWN.value
+
         is_correct = (pred_str == gt_str)
 
         if is_correct:
             correct_count += 1
+
+        if gt_str != FailureType.UNKNOWN.value:
+            resolved_total += 1
+            if is_correct:
+                resolved_correct += 1
+
         if diag_res.diagnosis == FailureType.UNKNOWN:
-            unknown_count += 1
+            unknown_diagnoses += 1
 
         if gt_str in confusion_matrix:
             if pred_str in confusion_matrix[gt_str]:
@@ -811,14 +1082,19 @@ def evaluate_observed_on_dataset(
             "raw_diagnosis": diag_res.diagnosis.value,
             "is_correct": is_correct,
             "is_suspected": diag_res.is_suspected,
+            "evidence_score": diag_res.evidence_score,
             "confidence": diag_res.confidence,
             "evidence": diag_res.evidence,
+            "reasons": diag_res.reasons,
+            "limitations": diag_res.limitations,
+            "telemetry_completeness": diag_res.telemetry_completeness,
             "signals": diag_res.signals,
             "candidate_count": diag_res.candidate_count,
             "mode": diag_res.mode,
         })
 
     per_class: dict[str, dict[str, Any]] = {}
+    f1_list: list[float] = []
     for cat in categories:
         tp = confusion_matrix[cat][cat]
         fn = sum(confusion_matrix[cat][p] for p in confusion_matrix[cat] if p != cat)
@@ -835,18 +1111,26 @@ def evaluate_observed_on_dataset(
             "precision": round(prec, 4),
             "recall": round(rec, 4),
             "f1": round(f1, 4),
+            "support": tp + fn,
         }
+        f1_list.append(f1)
 
+    macro_f1 = sum(f1_list) / len(f1_list) if f1_list else 0.0
     accuracy = correct_count / total if total > 0 else 0.0
-    coverage = (total - unknown_count) / total if total > 0 else 0.0
+    coverage = (total - unknown_diagnoses) / total if total > 0 else 0.0
+    accuracy_resolved = resolved_correct / resolved_total if resolved_total > 0 else 0.0
 
     return {
         "total_cases": total,
         "correct_diagnoses": correct_count,
-        "incorrect_diagnoses": total - correct_count - unknown_count,
-        "unknown_diagnoses": unknown_count,
+        "incorrect_diagnoses": total - correct_count,
+        "unknown_diagnoses": unknown_diagnoses,
+        "resolved_total": resolved_total,
+        "resolved_correct": resolved_correct,
+        "accuracy_resolved": round(accuracy_resolved, 4),
         "accuracy": round(accuracy, 4),
         "coverage": round(coverage, 4),
+        "macro_f1": round(macro_f1, 4),
         "per_class": per_class,
         "confusion_matrix": confusion_matrix,
         "records": records,

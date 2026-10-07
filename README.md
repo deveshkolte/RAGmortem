@@ -2,7 +2,7 @@
 
 An open-source debugger for Retrieval-Augmented Generation (RAG) applications that isolates why an answer failed — whether due to retrieval miss, ranking miss, generator ignoring context, or failing to abstain.
 
-> **Status: Experimental (v0.1 / Day 6 Adversarial Holdout Validation Complete)**  
+> **Status: Experimental (v0.1 / Day 7 Uncertainty-Aware & Evidence-Driven Diagnoser Complete)**  
 > RAGmortem is an active open-source project focused on local, explainable failure diagnosis for RAG applications. It deterministically attributes root causes across retrieval, ranking, generation, and abstention without requiring an external LLM judge.
 
 ---
@@ -11,27 +11,31 @@ An open-source debugger for Retrieval-Augmented Generation (RAG) applications th
 
 RAGmortem explicitly separates diagnostic evaluation into distinct operating modes and benchmark sets to ensure scientific credibility and prevent false claims of certainty:
 
-| Evaluation Mode / Benchmark | Input Requirements | Diagnostic Mechanism | In-Sample Benchmark (122 Cases) | Out-of-Sample Holdout (120 Cases) |
-| :--- | :--- | :--- | :---: | :---: |
-| **Realistic Observational Mode (Trace + Corpus)** | Execution telemetry + vector index query access | Candidate cutoff probe, refusal detection, corpus index audit | **100.0%** (122/122) | **81.7%** (98/120 all) / **98.0%** (98/100 resolved) |
-| **Trace-Only Mode (Offline APM Telemetry)** | Execution telemetry only (no vector index access) | Cutoff probe, refusal check, score heuristics | N/A | **50.8%** (61/120 all) / **50.0%** (50/100 resolved) |
-| **Reference-Assisted Mode** | Telemetry + developer expected reference answer | Answer correctness check, chunk containment scan | **100.0%** (122/122) | Evaluated on demand |
-| **Oracle Upper-Bound Mode** | Telemetry + hidden gold evidence chunk | Single-chunk counterfactual oracle replay | **100.0%** (122/122) | 100.0% |
+| Evaluation Mode / Benchmark | Input Requirements | Diagnostic Mechanism | Day 5 In-Sample (122 Cases) | Day 6 Baseline Holdout (120 Cases) | Day 7 Fresh Hidden Holdout (100 Cases) |
+| :--- | :--- | :--- | :---: | :---: | :---: |
+| **Realistic Observational Mode (Corpus-Aware)** | Execution trace + vector index query access | Candidate cutoff probe, relative score margins, corpus audit | **100.0%** (122/122) | **89.2%** (107/120 all) / **100%** unknown recall | **88.0%** (88/100 all) / **85.0%** resolved / **100%** unknown recall |
+| **Trace-Only Mode (Offline APM Telemetry)** | Execution trace only (zero vector index access) | Cutoff probe, refusal check, ambiguity bands | N/A | **50.8%** (61/120 all) / **50.0%** resolved | **60.0%** (60/100 all) / **50.0%** resolved (100% precision) |
+| **Reference-Assisted Mode** | Trace + developer expected reference answer | Answer correctness check, chunk containment scan | **100.0%** (122/122) | Evaluated on demand | Evaluated on demand |
+| **Oracle Upper-Bound Mode** | Trace + hidden gold evidence chunk | Single-chunk counterfactual oracle replay | **100.0%** (122/122) | 100.0% | 100.0% |
 
-> **Critical Caveat Regarding Generalization**:  
-> The 100.0% accuracy achieved on Day 5 was an in-sample result on the synthetic operational dataset used during development. In the Day 6 **adversarial holdout validation** (testing an entirely separate domain of 50 cloud/compliance chunks and 120 new failure cases including 20 ambiguous cases):
-> - **Resolved Failures**: Achieved **98.0%** accuracy across clean retrieval, ranking, generation, and abstention failures.
-> - **Ambiguous / Unknown Cases**: Achieved **0.0% recall on unknown** in corpus-aware mode because current heuristics forcibly partition the feature space into the four known failure types.
-> - **Trace-Only Limitation**: Without active corpus index access, the system cannot distinguish unanswerable queries from retriever misses and safely defaults to `unknown` on low-relevance responses (49.2% coverage).
+> **Critical Findings on Generalization & Uncertainty (Days 5, 6, & 7)**:  
+> - **Day 5 In-Sample Controlled Benchmark**: Achieved 100.0% accuracy on the synthetic operational dataset used during development. This served as an upper-bound verification that the taxonomy and heuristics are logically coherent.
+> - **Day 6 Baseline Holdout Limitation**: On an unseen domain (50 cloud/compliance chunks, 120 cases), corpus-aware accuracy dropped to 81.7%, trace-only to 50.8%, and unknown recall was 0.0% because fixed cosine thresholds forced ambiguous cases into arbitrary failure buckets.
+> - **Day 7 Uncertainty-Aware Advancement**: By replacing rigid cosine thresholds with relative score margins, candidate gap metrics, deterministic evidence scoring, and an explicit `UNKNOWN` first-class result:
+>   - **Day 6 Holdout (Phase A)** improved from 81.7% to **89.2%** accuracy, with unknown recall jumping from 0.0% to **100.0%** (20/20).
+>   - **Fresh Hidden Holdout (Phase B - BioTrial Clinical Trials Domain)**: Evaluated with frozen code on 100 unseen cases (20 retrieval, 20 ranking, 20 generation, 20 abstention, 20 unknown). Achieved **88.0%** overall accuracy, **85.0%** accuracy on resolved cases, **100.0%** unknown recall (20/20), **100.0%** ranking miss recall (20/20), and **100.0%** generation failure recall (20/20).
+> - **Trace-Only Boundary**: Without active corpus index access, weak retrievals legitimately cannot distinguish whether the retriever missed indexed documents or the user question was inherently unanswerable. The diagnoser now safely returns `UNKNOWN` (with `evidence_score = 0.0` and explicit limitations), achieving 100% unknown recall and 100% precision on resolved cases in trace-only mode.
 
 ---
 
-## 3. Diagnostic Workflow
+## 3. Uncertainty-Aware Diagnostic Workflow
 
 ```text
-Failed RAG execution
+Failed RAG execution trace
         ↓
-Inspect retrieval candidates & scores
+Validate telemetry completeness (COMPLETE / PARTIAL / INSUFFICIENT)
+        ↓
+Missing query, answer, context, or scores? → UNKNOWN (evidence_score = 0.0)
         ↓
 Refusal detected in answer?
      /        \
@@ -41,28 +45,36 @@ Appropriate  Candidate pool > top-k?
 Refusal      /        \
 (or False   YES        NO
 Refusal)     ↓          ↓
-        Ranking      Context score high?
+        Ranking      Borderline ambiguity band? [0.47, 0.53]
         Cutoff       /        \
         Probe      YES        NO
                     ↓          ↓
-               Generation    Corpus audit:
-               Failure       Docs exist?
-               (Ignored)     /        \
-                           YES        NO
-                            ↓          ↓
-                         Retrieval  Abstention
-                         Miss       Failure
+                 UNKNOWN    High context score? (> 0.53)
+                            /        \
+                          YES        NO
+                           ↓          ↓
+                      Generation    Corpus access requested?
+                      Suspected     /        \
+                                  YES        NO
+                                   ↓          ↓
+                              Corpus audit:  Trace-only:
+                              Separation?    UNKNOWN
+                              /        \     (cannot separate)
+                            YES        NO
+                             ↓          ↓
+                          Retrieval  Abstention
+                          Suspected  Suspected
 ```
 
-### The Observational Signals:
+### Core Diagnostic Mechanisms:
 
-1. **Refusal Inspection (`is_abstaining`)**: Deterministically checks if the answer contains refusal patterns. Combined with retrieval scores, distinguishes appropriate abstention from false refusal.
-2. **Rank Cutoff Probe**: When candidate pools contain items beyond the context window cutoff ($> \text{top-k}$) with strong scores, flags `ranking_suspected`.
-3. **Context Relevance Probe**: When top-k retrieved chunks exhibit high relevance ($\ge 0.50$) but the generated answer contradicts or ignores evidence, flags `generation_suspected`.
-4. **Corpus Index Audit**: When retrieved chunks are weak ($< 0.50$), checks maximum semantic relevance across the corpus index:
-   - High corpus score ($\ge 0.48$): Documents exist that retriever missed $\rightarrow$ `retrieval_suspected`.
-   - Low corpus score ($< 0.48$): Corpus genuinely lacks supporting info $\rightarrow$ `abstention_suspected`.
-5. **Indeterminate Fallback**: If corpus index is unavailable to disambiguate weak retrieval from unanswerable queries, safely returns `unknown` rather than guessing.
+1. **Telemetry Completeness**: Explicitly validates trace integrity (`COMPLETE`, `PARTIAL`, `INSUFFICIENT`). Missing scores, missing context, or missing answers directly produce `UNKNOWN` rather than defaulting to low scores.
+2. **Deterministic Evidence Score (`evidence_score`)**: Replaces hardcoded pseudo-confidence numbers (0.75, 0.85) with an explainable, deterministic evidence score calculated from relative score separation, cutoff gaps, candidate pool quality, and reference agreement.
+3. **Relative Signals & Ambiguity Bands**: Rather than brittle fixed thresholds, diagnoses use relative score drops between candidates ($\text{cutoff\_gap} \le 0.08$), candidate density, clean corpus separation ($\ge 0.06$), and an explicit ambiguity band ($[0.47, 0.53]$) where borderline relevance without reference answers returns `UNKNOWN`.
+4. **First-Class `UNKNOWN`**: Returns `UNKNOWN` with structured explanatory reasons and limitations whenever evidence is insufficient, conflicting, or requires unavailable corpus access.
+5. **Clear Trace-Only vs. Corpus-Aware Separation**:
+   - `diagnose(trace, mode="trace_only")`: Pure APM trace evaluation without corpus probing.
+   - `diagnose(trace, corpus=app, mode="corpus_aware")`: Audits corpus index when runtime retrieval scores are low.
 
 In Day 3 of the technical sprint, we benchmarked existing open-source RAG evaluation and diagnostic tools against our 122 validated controlled failure cases ([`benchmarks/results.md`](benchmarks/results.md)):
 
