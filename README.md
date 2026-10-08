@@ -1,6 +1,6 @@
 # RAGmortem
 
-A debugger for RAG applications that diagnoses whether a bad answer came from retrieval, ranking, generation, or an unsupported question.
+A debugger for RAG apps: it finds why an answer went wrong — retrieval, ranking, generation, or lack of evidence — and tests the diagnosis before you ship it.
 
 > **Project Status: Experimental open-source RAG debugger (v0.1)**  
 > RAGmortem is an experimental, deterministic root-cause failure diagnoser for RAG pipelines. It isolates failures across retrieval, ranking, generation, and abstention without requiring an external LLM judge.
@@ -81,6 +81,8 @@ RAGmortem uses an uncertainty-aware decision tree operating on observable execut
 ---
 
 ## 4. Installation
+
+Requires **Python >= 3.11**.
 
 ```bash
 pip install -e .
