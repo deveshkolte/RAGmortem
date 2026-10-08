@@ -2,54 +2,108 @@
 
 A debugger for RAG applications that diagnoses whether a bad answer came from retrieval, ranking, generation, or an unsupported question.
 
-> **Status: Experimental (v0.1 — Real RAG Integration API)**  
-> **RAGmortem is an experimental, deterministic RAG failure diagnoser.** It deterministically attributes root causes across retrieval, ranking, generation, and abstention without requiring an external LLM judge.
->
-> **Honest Benchmark Summary:**
-> - **BioTrial Hidden Holdout (100 Cases)**: **100%** corpus-aware accuracy on the current frozen benchmark (96.0% overall / 95.0% resolved / 100% unknown recall).
-> - **FinDebt Domain Holdout (40 Cases)**: **83.3%** accuracy on resolved cases, **65.0%** overall on the 40-case holdout.
-> - **Trace-Only Mode Coverage**: Trace-only mode has intentionally lower coverage (~60.0% on holdout) because without active corpus index access, weak retrievals legitimately cannot distinguish whether the retriever missed indexed documents or the question was inherently unanswerable from the corpus. It safely refuses ambiguous cases into `UNKNOWN`.
-> - **Controlled Benchmarks $\neq$ Real-World Validation**: Controlled synthetic benchmarks verify heuristic logic and taxonomy boundaries, but do NOT guarantee 100% real-world accuracy or universal RAG compatibility. RAGmortem is currently an experimental research and developer debugging tool.
+> **Project Status: Experimental open-source RAG debugger (v0.1)**  
+> RAGmortem is an experimental, deterministic root-cause failure diagnoser for RAG pipelines. It isolates failures across retrieval, ranking, generation, and abstention without requiring an external LLM judge.
+
+```python
+from ragmortem import diagnose
+
+# 20-second quickstart: diagnose an execution trace directly
+result = diagnose(
+    query="What is the mandatory engineering response time for a P1 incident?",
+    retrieved_chunks=[{"id": "doc_dr", "text": "Disaster recovery drills occur quarterly.", "score": 0.14}],
+    answer="Engineers must run quarterly disaster recovery exercises.",
+    corpus="examples/reference_rag/documents",
+    mode="corpus_aware",
+)
+
+print(result.to_text())
+```
+
+Output:
+```text
+Failure: RETRIEVAL_SUSPECTED (suspected)
+Evidence Score: 0.94
+
+Why:
+The answer becomes supported when the missing high-relevance chunk is available, but the relevant chunk was absent from the retrieved top-k results.
+
+Evidence:
+  * Retriever returned low-relevance chunks at runtime (top score: 0.140).
+  * Corpus audit shows indexed documents exist with high relevance to question.
+  * Corpus contains candidate 'chunk_incident_severity_p1' with distinct semantic relevance (score: 0.741).
+
+Recommended next step:
+Increase retrieval recall: inspect query reformulation, adjust embedding/indexing strategy, or expand candidate retrieval pool.
+
+Mode: corpus_aware
+```
 
 ---
 
-## 1. Privacy & Data Safety
+## 1. What Problem RAGmortem Solves
 
-RAGmortem is designed as a local-first, privacy-respecting developer debugging tool:
+When a RAG system returns an incorrect answer, traditional observability tools only compute continuous quality scores (e.g. faithfulness: 0.42). They do not tell you **which component broke**:
+- **Did the retriever fail to find the document?** (`retrieval_miss`)
+- **Did candidate retrieval find it, but ranking dropped it below top-k?** (`ranking_miss`)
+- **Did the generator receive the correct context, but ignore it or hallucinate?** (`generation_ignored_context`)
+- **Was the question unanswerable from the knowledge base, but the model answered anyway?** (`should_abstain`)
+- **Is telemetry insufficient to distinguish the cause?** (`unknown`)
 
-* **Zero Telemetry**: No usage tracking, no analytics, no phone-home pings.
-* **No Network Calls**: The diagnostic engine runs 100% locally on your machine or server.
+RAGmortem replaces ambiguous scores with deterministic, reproducible root-cause attribution and concrete next-step remediation actions.
+
+---
+
+## 2. Privacy & Data Safety
+
+RAGmortem is built as a local-first developer debugging tool:
+
+* **Zero Telemetry**: No tracking, no external analytics, no telemetry platform integration.
+* **No Network Calls**: Diagnostic evaluation executes 100% locally on your CPU.
 * **No Stored API Keys**: Diagnoser does not require, store, or transmit LLM API keys.
-* **No Data Uploads**: Prompts, retrieved documents, and generated answers are never uploaded anywhere.
-* **Safe Telemetry Handling**: Does not automatically log or persist sensitive document text unless you explicitly write it to a trace. Local trace persistence is strictly opt-in.
+* **No Prompts/Answers Uploaded**: Your data stays on your machine.
+* **No Automatic Sensitive Logging**: Document texts and queries are evaluated in-memory. Local trace persistence is strictly opt-in.
 
 ---
 
-## 2. Python SDK Integration
+## 3. How It Works
 
-Integrate RAGmortem into any Python RAG application with minimal code.
+RAGmortem uses an uncertainty-aware decision tree operating on observable execution telemetry:
 
-### Installation
+1. **Telemetry Completeness Check**: Validates that query, answer, context, and similarity scores are present. Missing telemetry directly produces `UNKNOWN` rather than fabricated certainty.
+2. **Abstention & Refusal Probe**: Detects whether the generator emitted a refusal. If low retrieval score matches refusal, marks `NO_FAILURE` (appropriate abstention). If context had strong scores, marks false refusal.
+3. **Candidate Cutoff Probe**: Inspects the candidate retrieval pool prior to top-k truncation. If a viable candidate exists immediately below the cutoff ($\text{score gap} \le 0.08$), isolates a `RANKING_SUSPECTED` failure.
+4. **Context Score Probe**: High similarity in context with an ungrounded or contradictory answer isolates `GENERATION_SUSPECTED`.
+5. **Corpus Audit vs. Trace-Only Boundary**:
+   - In `corpus_aware` mode, audits the corpus index to distinguish whether documents were missed (`RETRIEVAL_SUSPECTED`) or the question was unanswerable (`ABSTENTION_SUSPECTED`).
+   - In `trace_only` mode, safely returns `UNKNOWN` because an APM trace without corpus access cannot infer document existence.
+
+---
+
+## 4. Installation
 
 ```bash
 pip install -e .
 ```
 
-Verify in a clean process:
+Verify in a clean Python process:
 ```bash
 python -c "import ragmortem; print(ragmortem.__version__)"
 ```
 
+---
+
+## 5. Python SDK Usage
+
 ### Trace Construction
 
-Capture what your application observed during execution using `ragmortem.trace`:
+Use `ragmortem.trace` to record runtime execution telemetry:
 
 ```python
 from ragmortem import trace, diagnose
 
-# Record runtime execution telemetry
 t = trace(
-    query="What is the mandatory engineering response time for a P1 incident?",
+    query="What is the P1 incident response SLA?",
     retrieved_chunks=[
         {"id": "doc_dr", "text": "Disaster recovery drills occur quarterly.", "score": 0.14},
         {"id": "doc_sla", "text": "Communication cadence is bi-weekly.", "score": 0.12},
@@ -60,94 +114,55 @@ t = trace(
 )
 ```
 
-Missing telemetry is never silently fabricated (missing scores, context, or answer remain explicit and safely trigger `UNKNOWN`).
+Missing fields are never silently fabricated (missing scores, context, or answer remain explicit).
 
-### Running Diagnosis
+### Diagnostic Operating Modes
 
-RAGmortem supports two explicit diagnostic modes:
-
-1. **`trace_only`**: Evaluates purely observable APM telemetry without probing the corpus.
-2. **`corpus_aware`**: Probes the corpus index when runtime retrieval scores are low to determine whether supporting documents existed in the knowledge base.
-
-> **Rule**: Modes are explicit. RAGmortem never silently switches between `trace_only` and `corpus_aware`.
+RAGmortem supports two explicit modes (**never silently switches between them**):
 
 #### Mode A: Trace-Only (Offline APM / Logs)
-
 ```python
 result = diagnose(t, mode="trace_only")
-
-print(f"Failure: {result.failure_type}")
-print(f"Evidence Score: {result.evidence_score}")
-print(f"Why: {result.explanation}")
-print(f"Recommended next step: {result.recommended_action}")
+print(result.failure_type)        # FailureType.UNKNOWN
+print(result.recommended_action) # Explains missing corpus access
 ```
 
-Output:
-```text
-Failure: UNKNOWN
-Evidence Score: 0.00
-Why: Available telemetry is insufficient to determine root cause: Corpus index unavailable in trace-only mode.
-Recommended next step: Provide complete execution telemetry or enable corpus-aware mode with corpus index access.
-```
-
-#### Mode B: Corpus-Aware (Corpus Probing)
-
-When you supply your corpus index or document directory, RAGmortem audits indexed documents:
-
+#### Mode B: Corpus-Aware (Knowledge Base Probing)
 ```python
-result = diagnose(
-    t,
-    corpus="examples/reference_rag/documents",
-    mode="corpus_aware",
-)
-
-print(f"Failure: {result.failure_type}")
-print(f"Evidence Score: {result.evidence_score}")
-print(f"Why: {result.explanation}")
-print(f"Recommended next step: {result.recommended_action}")
+result = diagnose(t, corpus="examples/reference_rag/documents", mode="corpus_aware")
+print(result.failure_type)        # FailureType.RETRIEVAL_SUSPECTED
+print(result.evidence_score)     # 0.94
+print(result.recommended_action) # Increase retrieval recall / candidate pool
 ```
 
-Output:
-```text
-Failure: RETRIEVAL_SUSPECTED (suspected)
-Evidence Score: 0.94
-Why: The answer becomes supported when the missing high-relevance chunk is available, but the relevant chunk was absent from the retrieved top-k results.
-Recommended next step: Increase retrieval recall: inspect query reformulation, adjust embedding/indexing strategy, or expand candidate retrieval pool.
-```
+### Complete Integration Demonstrations
 
-### Complete Reference Example
+* [`examples/integrations/minimal_rag.py`](examples/integrations/minimal_rag.py): Minimal code integration across all 6 diagnostic scenarios.
+* [`examples/integrations/realistic_rag_demo.py`](examples/integrations/realistic_rag_demo.py): End-to-end small RAG app smoke test (`documents → embeddings → retrieval → context → generator → RAGmortem`).
 
-See [`examples/integrations/minimal_rag.py`](examples/integrations/minimal_rag.py) for an end-to-end runnable script demonstrating all 6 failure and validation scenarios:
-1. Successful answer / appropriate abstention (`NO_FAILURE`)
-2. Retrieval miss (`RETRIEVAL_SUSPECTED`)
-3. Ranking cutoff miss (`RANKING_SUSPECTED`)
-4. Generation ignored context (`GENERATION_SUSPECTED`)
-5. Unsupported question (`ABSTENTION_SUSPECTED`)
-6. Insufficient telemetry (`UNKNOWN`)
-
-Run it directly:
+Run the demo locally:
 ```bash
-python examples/integrations/minimal_rag.py
+python examples/integrations/realistic_rag_demo.py
 ```
 
 ---
 
-## 3. CLI: Diagnosing Saved Traces
+## 6. CLI: Diagnosing Saved Traces
 
-Diagnose saved trace files directly from the command line:
+Diagnose saved JSON trace files from the terminal:
 
 ```bash
-# Trace-only diagnosis from a JSON file
+# Trace-only mode (offline APM logs)
 ragmortem diagnose-trace trace.json
 
-# Corpus-aware diagnosis with corpus document directory
+# Corpus-aware mode (with documents directory)
 ragmortem diagnose-trace trace.json --corpus examples/reference_rag/documents
 
-# Structured JSON output for piping or APM integration
+# Structured JSON output
 ragmortem diagnose-trace trace.json --json
 ```
 
-### Trace JSON Format
+### Standard JSON Trace Schema
 
 ```json
 {
@@ -157,14 +172,9 @@ ragmortem diagnose-trace trace.json --json
       "id": "chunk_dr_drill_frequency",
       "text": "Disaster recovery drills occur quarterly.",
       "score": 0.1407
-    },
-    {
-      "id": "chunk_communication_cadence",
-      "text": "All-hands communication occurs bi-weekly.",
-      "score": 0.1285
     }
   ],
-  "scores": [0.1407, 0.1285],
+  "scores": [0.1407],
   "answer": "Engineers must execute drills quarterly.",
   "context": "[1] Disaster recovery drills occur quarterly.",
   "metadata": {
@@ -176,50 +186,53 @@ ragmortem diagnose-trace trace.json --json
 
 ---
 
-## 4. Diagnostic Modes & Validation Benchmarks
+## 7. Failure Taxonomy
 
-RAGmortem separates diagnostic evaluation into distinct operating modes to ensure scientific credibility and avoid claiming false certainty:
-
-| Evaluation Mode / Benchmark | Input Requirements | Diagnostic Mechanism | Day 5 In-Sample (122 Cases) | Day 6 Cloud Holdout (120 Cases) | Day 7/8 BioTrial Holdout (100 Cases) | Day 8 FinDebt Holdout (40 Cases) |
-| :--- | :--- | :--- | :---: | :---: | :---: | :---: |
-| **Realistic Observational Mode (Corpus-Aware)** | Execution trace + vector index query access | Candidate cutoff probe, relative score margins, question support audit | **100.0%** (122/122) | **90.8%** (109/120 all) / **100%** unknown recall | **100.0%** frozen benchmark / **96.0%** all / **100%** unknown recall | **65.0%** (26/40 all) / **83.3%** resolved |
-| **Trace-Only Mode (Offline APM Telemetry)** | Execution trace only (zero vector index access) | Cutoff probe, refusal check, ambiguity bands | N/A | **58.3%** (70/120 all) / **50.0%** resolved | **60.0%** (60/100 all) / **50.0%** resolved (100% precision) | **7.5%** (safely refuses to guess without corpus) |
-| **Reference-Assisted Mode** | Trace + developer expected reference answer | Answer correctness check, chunk containment scan | **100.0%** (122/122) | Evaluated on demand | Evaluated on demand | Evaluated on demand |
-| **Oracle Upper-Bound Mode** | Trace + hidden gold evidence chunk | Single-chunk counterfactual oracle replay | **100.0%** (122/122) | 100.0% | 100.0% | 100.0% |
-
----
-
-## 5. Failure Taxonomy
-
-RAGmortem classifies failures into four root causes plus a first-class `unknown` fallback:
-
-1. **`retrieval_miss` (`retrieval_suspected`)**: The required evidence exists in the corpus/index, but the retriever failed to return it in the candidate set.
-2. **`ranking_miss` (`ranking_suspected`)**: The required evidence was retrieved in the candidate pool, but was truncated below the prompt top-k context window.
-3. **`generation_ignored_context` (`generation_suspected` / `generation_proven`)**: Relevant evidence was present in the prompt context, but the generator hallucinated, ignored it, or produced a false refusal.
-4. **`should_abstain` (`abstention_suspected`)**: The question cannot be answered from the corpus, but the system generated an ungrounded substantive answer instead of refusing.
-5. **`unknown`**: Available telemetry is insufficient (e.g. missing scores, dropped candidate pool) or signals are ambiguous. RAGmortem explicitly returns `UNKNOWN` rather than guessing.
-6. **`no_failure`**: Answer generation succeeded from retrieved context, or the system appropriately refused an unanswerable question.
+| Failure Mode | Canonical Type | What Happened | Recommended Next Step |
+| :--- | :--- | :--- | :--- |
+| **`retrieval_suspected`** | `retrieval_miss` | Supporting chunk exists in corpus but was omitted from candidate set. | Increase retrieval recall, adjust embedding model, or expand candidate pool. |
+| **`ranking_suspected`** | `ranking_miss` | Supporting chunk was retrieved in candidates, but fell below top-k cutoff. | Tune re-ranker, expand context window (top-k), or re-score candidates. |
+| **`generation_suspected`** | `generation_ignored_context` | High-relevance context was in prompt, but generator hallucinated or ignored it. | Tighten prompt grounding constraints, lower temperature, refine prompt. |
+| **`abstention_suspected`** | `should_abstain` | Corpus contains no supporting evidence, but generator fabricated an answer. | Add strict refusal instructions for out-of-domain queries; filter low scores. |
+| **`unknown`** | `unknown` | Telemetry is incomplete (missing scores, dropped candidates) or signals are ambiguous. | Provide complete telemetry or supply corpus index access. |
+| **`no_failure`** | `no_failure` | Answer is verified grounded, or system correctly refused unanswerable question. | No corrective action required. |
 
 ---
 
-## 6. Current Limitations & Scope
+## 8. Validation Benchmarks & Historical Evidence
 
-* **Experimental Status**: The diagnoser heuristics are evaluated against frozen research benchmarks and are undergoing iteration. Do not treat results as production-guaranteed certainty.
-* **Single-Hop Factual Focus**: Optimized for single-chunk answerable and unanswerable lookups. Multi-hop synthesis across multiple disjoint documents remains active research.
-* **Uncalibrated Confidence**: `evidence_score` represents relative deterministic signal strength, not a calibrated Bayesian probability.
-* **Corpus Requirement for Abstention**: Without corpus/index access, trace-only mode cannot reliably separate retrieval misses from unanswerable queries and will safely output `UNKNOWN`.
+To ensure scientific credibility, RAGmortem distinguishes strictly between **controlled benchmarks**, **adversarial holdouts**, and **integration smoke tests**.
+
+> **Important**: Controlled benchmark metrics do NOT represent real-world accuracy on uncurated production data.
+
+| Evaluation Suite / Benchmark | Purpose | Corpus-Aware Accuracy | Trace-Only Accuracy | Unknown Recall | Key Findings |
+| :--- | :--- | :---: | :---: | :---: | :--- |
+| **Day 5 Controlled In-Sample** (122 cases) | Development baseline | 100.0% (122/122) | N/A | N/A | Verified taxonomy and heuristic logic coherence under ideal conditions. |
+| **Day 6 Adversarial Holdout** (120 cases) | Cloud/DevOps holdout | 90.8% (109/120) | 58.3% (70/120) | 100.0% (20/20) | Exposed fixed-threshold brittleness; motivated uncertainty-aware scoring. |
+| **Day 7/8 BioTrial Frozen Holdout** (100 cases) | Clinical trials holdout | 100.0% (frozen upper-bound) / 96.0% overall | 60.0% (50.0% resolved, 100% precision) | 100.0% (20/20) | 100% recall on ranking misses and generation failures. Trace-only safely refuses low-score ambiguity. |
+| **Day 8 FinDebt Domain Holdout** (40 cases) | Complex corporate finance | 65.0% overall / 83.3% resolved | 7.5% (safely refuses) | 100.0% | Demonstrated that background terminology traps in specialized domains require lexical support analysis. |
+| **Integration Smoke Test** (`realistic_rag_demo.py`) | End-to-end integration | Smoke validation | Smoke validation | Smoke validation | Proves public API usability in real Python code without synthetic fault injection. |
 
 ---
 
-## 7. Testing
+## 9. Current Limitations & Scope
 
-Run the full test suite:
+* **Experimental Status**: Heuristics are deterministic and reproducible, but remain experimental research. Do not treat as production-guaranteed certitude.
+* **Single-Hop Factual Focus**: Optimized for single-chunk answerable lookups. Multi-hop reasoning across disjoint documents remains active research.
+* **Uncalibrated Confidence**: `evidence_score` represents relative deterministic heuristic strength, not a calibrated Bayesian probability.
+* **Trace-Only Uncertainty**: Without corpus index access, trace-only mode cannot infer document presence in the corpus and intentionally outputs `UNKNOWN`.
+
+---
+
+## 10. Testing
+
+Run the full offline test suite:
 
 ```bash
 pytest tests/ -v
 ```
 
-All 102 unit, integration, benchmark, and uncertainty tests run 100% offline without network calls or API keys.
+All 102 tests run 100% offline on CPU without network requests or API keys.
 
 ---
 
