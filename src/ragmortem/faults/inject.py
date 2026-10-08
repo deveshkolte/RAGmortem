@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Sequence, TYPE_CHECKING
 
 import numpy as np
 
-from examples.reference_rag.app import ReferenceRagApp
+if TYPE_CHECKING:
+    from examples.reference_rag.app import ReferenceRagApp
 from ragmortem.faults.eval import is_abstaining, is_answer_correct, validate_fault_case
 from ragmortem.faults.models import (
     BaselineExecution,

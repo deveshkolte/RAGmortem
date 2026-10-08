@@ -228,12 +228,127 @@ class DiagnosticResult:
         elif self.evidence_score == 0.0 and self.confidence != 0.0:
             self.evidence_score = self.confidence
 
+    @property
+    def failure_type(self) -> FailureType:
+        """Failure mode attributed by RAGmortem."""
+        return self.diagnosis
+
+    @property
+    def canonical_failure_type(self) -> FailureType:
+        """Canonical failure type mapped from observational state."""
+        return self.diagnosis.canonical
+
+    @property
+    def explanation(self) -> str:
+        """Deterministic human-readable explanation of root-cause attribution."""
+        canonical = self.diagnosis.canonical
+        if canonical == FailureType.RETRIEVAL_MISS:
+            return (
+                "The answer becomes supported when the missing high-relevance chunk is available, "
+                "but the relevant chunk was absent from the retrieved top-k results."
+            )
+        elif canonical == FailureType.RANKING_MISS:
+            return (
+                "The relevant chunk existed within retrieved candidates, but was ranked below the "
+                "effective retrieval context cutoff."
+            )
+        elif canonical == FailureType.GENERATION_IGNORED_CONTEXT:
+            return (
+                "Relevant context was available in the prompt context window, but the answer did not "
+                "use it, hallucinated, or emitted an unwarranted refusal."
+            )
+        elif canonical == FailureType.SHOULD_ABSTAIN:
+            return (
+                "The corpus does not provide deterministic support for the query, but the system generated "
+                "a substantive answer instead of abstaining."
+            )
+        elif canonical == FailureType.NO_FAILURE:
+            return (
+                "No failure detected: retrieval provided sufficient context and the answer appears grounded, "
+                "or the system properly abstained on an unanswerable query."
+            )
+        else:
+            reasons_summary = "; ".join(self.limitations or self.reasons)
+            if reasons_summary:
+                return f"Available telemetry is insufficient to determine root cause: {reasons_summary}."
+            return (
+                "Available telemetry is insufficient or ambiguous. Without additional signals (e.g. similarity "
+                "scores or corpus index access), root cause cannot be deterministically isolated."
+            )
+
+    @property
+    def recommended_action(self) -> str:
+        """Deterministic recommended next steps for developer remediation."""
+        canonical = self.diagnosis.canonical
+        if canonical == FailureType.RETRIEVAL_MISS:
+            return (
+                "Increase retrieval recall: inspect query reformulation, adjust embedding/indexing strategy, "
+                "or expand candidate retrieval pool."
+            )
+        elif canonical == FailureType.RANKING_MISS:
+            return (
+                "Improve re-ranking: tune re-ranker weights, expand context window (top-k), or re-score candidate "
+                "pool before truncation."
+            )
+        elif canonical == FailureType.GENERATION_IGNORED_CONTEXT:
+            return (
+                "Inspect generator prompt: enforce grounding constraints, decrease generator temperature, or "
+                "improve system instructions to adhere strictly to supplied context."
+            )
+        elif canonical == FailureType.SHOULD_ABSTAIN:
+            return (
+                "Implement refusal/abstention guardrails: add explicit abstain instructions for out-of-domain queries "
+                "or filter questions with low retrieval relevance."
+            )
+        elif canonical == FailureType.NO_FAILURE:
+            return "No corrective action required."
+        else:
+            return (
+                "Provide complete execution telemetry (retrieved chunks, similarity scores, candidate pool) or "
+                "enable corpus-aware mode with corpus index access."
+            )
+
+    def to_text(self) -> str:
+        """Format a clean, readable text report."""
+        suspect_tag = " (suspected)" if self.is_suspected else ""
+        lines = [
+            f"Failure: {self.diagnosis.value.upper()}{suspect_tag}",
+            f"Evidence Score: {self.evidence_score:.2f}",
+            "",
+            "Why:",
+            self.explanation,
+            "",
+            "Evidence:",
+        ]
+        if self.evidence:
+            for ev in self.evidence:
+                lines.append(f"  * {ev}")
+        else:
+            lines.append("  * No specific evidence logged.")
+
+        lines.extend([
+            "",
+            "Recommended next step:",
+            self.recommended_action,
+            "",
+            f"Mode: {self.mode}",
+        ])
+        if self.limitations:
+            lines.append("Limitations:")
+            for lim in self.limitations:
+                lines.append(f"  * {lim}")
+        return "\n".join(lines)
+
     def to_dict(self) -> dict[str, Any]:
         return {
+            "failure_type": self.failure_type.value,
+            "canonical_failure_type": self.canonical_failure_type.value,
             "diagnosis": self.diagnosis.value,
             "canonical_diagnosis": self.diagnosis.canonical.value,
             "evidence_score": round(self.evidence_score, 4),
             "confidence": round(self.confidence, 4),
+            "explanation": self.explanation,
+            "recommended_action": self.recommended_action,
             "evidence": list(self.evidence),
             "reasons": list(self.reasons),
             "limitations": list(self.limitations),
@@ -253,8 +368,9 @@ class DiagnosticResult:
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> DiagnosticResult:
         ev_score = float(data.get("evidence_score", data.get("confidence", 0.0)))
+        diag_key = data.get("diagnosis") or data.get("failure_type")
         return cls(
-            diagnosis=FailureType(data["diagnosis"]),
+            diagnosis=FailureType(diag_key),
             evidence_score=ev_score,
             confidence=float(data.get("confidence", ev_score)),
             evidence=list(data.get("evidence", [])),

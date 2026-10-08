@@ -14,7 +14,12 @@ if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
 from ragmortem.dataset import load_questions, validate_dataset
-from examples.reference_rag.app import ReferenceRagApp, load_corpus_from_directory
+try:
+    from examples.reference_rag.app import ReferenceRagApp, load_corpus_from_directory
+except ImportError:
+    ReferenceRagApp = None  # type: ignore
+    load_corpus_from_directory = None  # type: ignore
+
 
 
 
@@ -341,6 +346,59 @@ def cmd_diagnose(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_diagnose_trace(args: argparse.Namespace) -> int:
+    """Diagnose failure root cause for a single RAG execution trace JSON file."""
+    trace_path = Path(args.trace)
+    if not trace_path.exists() and args.trace != "-":
+        print(f"Error: Trace file '{args.trace}' does not exist.", file=sys.stderr)
+        return 1
+
+    try:
+        if args.trace == "-":
+            content = sys.stdin.read()
+            data = json.loads(content)
+        else:
+            with open(trace_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+    except Exception as exc:
+        print(f"Error reading trace JSON: {exc}", file=sys.stderr)
+        return 1
+
+    from ragmortem.api import diagnose
+    from ragmortem.trace import Trace
+
+    mode = args.mode
+    corpus_dir = Path(args.corpus) if args.corpus else None
+
+    if corpus_dir and not corpus_dir.exists():
+        print(f"Error: Corpus directory '{corpus_dir}' does not exist.", file=sys.stderr)
+        return 1
+
+    try:
+        parsed_trace = Trace.from_dict(data)
+        result = diagnose(
+            parsed_trace,
+            corpus=corpus_dir,
+            mode=mode,
+        )
+    except Exception as exc:
+        print(f"Error during diagnosis: {exc}", file=sys.stderr)
+        return 1
+
+    if args.json:
+        print(json.dumps(result.to_dict(), indent=2))
+        return 0
+
+    print("=" * 70)
+    print("RAGmortem Trace Diagnosis")
+    print(f"Trace:       {args.trace}")
+    print(f"Mode:        {result.mode}")
+    print("=" * 70)
+    print(result.to_text())
+    print("=" * 70)
+    return 0
+
+
 def cmd_evaluate_diagnoser(args: argparse.Namespace) -> int:
     """Evaluate diagnoser against the benchmark dataset and write report."""
     faults_path = Path(args.faults)
@@ -587,6 +645,32 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Output destination for diagnoses JSONL (defaults to evals/observed_diagnoses.jsonl or evals/diagnoses.jsonl)",
     )
 
+    # diagnose-trace
+    dt_parser = subparsers.add_parser(
+        "diagnose-trace",
+        help="Diagnose failure root causes for a single RAG execution trace JSON file.",
+    )
+    dt_parser.add_argument(
+        "trace",
+        help="Path to trace JSON file (or '-' for stdin).",
+    )
+    dt_parser.add_argument(
+        "--corpus",
+        default=None,
+        help="Optional path to documents directory for corpus-aware diagnosis.",
+    )
+    dt_parser.add_argument(
+        "--mode",
+        choices=["trace_only", "corpus_aware", "trace-only", "corpus-aware"],
+        default=None,
+        help="Diagnostic operating mode: trace_only (default when no corpus) or corpus_aware.",
+    )
+    dt_parser.add_argument(
+        "--json",
+        action="store_true",
+        help="Output raw JSON diagnostic result instead of human-readable text.",
+    )
+
     args = parser.parse_args(argv)
 
     if args.command == "validate-dataset":
@@ -599,6 +683,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return cmd_validate_faults(args)
     elif args.command == "diagnose":
         return cmd_diagnose(args)
+    elif args.command == "diagnose-trace":
+        return cmd_diagnose_trace(args)
     elif args.command == "evaluate-diagnoser":
         return cmd_evaluate_diagnoser(args)
     return 1
