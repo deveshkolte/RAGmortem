@@ -14,8 +14,6 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Sequence
-
 # Ensure repo root is in python path
 repo_root = Path(__file__).resolve().parent.parent.parent
 if str(repo_root) not in sys.path:
@@ -23,8 +21,8 @@ if str(repo_root) not in sys.path:
 if str(repo_root / "src") not in sys.path:
     sys.path.insert(0, str(repo_root / "src"))
 
-from ragmortem import Chunk, diagnose, trace
-from examples.reference_rag.app import ReferenceRagApp, load_corpus_from_directory
+from ragmortem import diagnose, trace
+from examples.reference_rag.app import ReferenceRagApp
 
 
 def create_demo_pipeline() -> tuple[ReferenceRagApp, Path]:

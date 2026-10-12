@@ -6,9 +6,14 @@ Runs both Corpus-Aware and Trace-Only evaluation modes.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
-from collections import defaultdict
+
+# Ensure workspace root is in sys.path
+repo_root = Path(__file__).resolve().parent.parent
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
 
 from examples.reference_rag.app import ReferenceRagApp
 from ragmortem.diagnose import RAGDiagnoser, ObservedExecution

@@ -6,14 +6,14 @@ import json
 import sys
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 # Ensure repository root is in sys.path
 repo_root = Path(__file__).resolve().parent.parent
 if str(repo_root) not in sys.path:
     sys.path.insert(0, str(repo_root))
 
-from ragmortem.faults.eval import is_abstaining, is_answer_correct
+from ragmortem.faults.eval import is_answer_correct
 from ragmortem.faults.inject import load_injected_faults
 from ragmortem.faults.models import InjectedFaultCase
 

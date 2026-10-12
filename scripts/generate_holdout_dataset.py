@@ -1,17 +1,20 @@
 """Generate holdout dataset for Day 6 adversarial validation."""
 
 import json
+import sys
 from pathlib import Path
-import numpy as np
+
+# Ensure workspace root is in sys.path
+repo_root = Path(__file__).resolve().parent.parent
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
 
 from examples.reference_rag.app import ReferenceRagApp
 from ragmortem.faults.models import (
     BaselineExecution,
-    FaultConfig,
     FaultyExecution,
     InjectedFaultCase,
 )
-from ragmortem.taxonomy import FailureType
 
 HOLDOUT_DOCS_DIR = Path("examples/holdout_rag/documents")
 QUESTIONS_OUT = Path("evals/holdout_questions.jsonl")
@@ -276,7 +279,6 @@ def generate_dataset():
     app = ReferenceRagApp(corpus_dir=HOLDOUT_DOCS_DIR, mock_mode=True)
     all_chunks = app.chunks
     all_chunk_ids = [c.id for c in all_chunks]
-    chunk_map = {c.id: c for c in all_chunks}
 
     # 1. Questions records
     questions_records = []

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import re
 import string
-from typing import Set
 
 from ragmortem.faults.models import InjectedFaultCase
 from ragmortem.taxonomy import FailureType

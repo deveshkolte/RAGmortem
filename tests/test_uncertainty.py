@@ -18,14 +18,11 @@ Covers the 15 required scenarios from Day 7 specification:
 15. malformed trace
 """
 
-import pytest
 from unittest.mock import MagicMock
 from ragmortem.diagnose import (
     RAGDiagnoser,
     ObservedExecution,
-    DiagnosticResult,
     TelemetryCompleteness,
-    EvidenceModel,
     diagnose,
 )
 from ragmortem.taxonomy import FailureType

@@ -20,19 +20,15 @@ Verifies the 15 required scenarios:
 
 from __future__ import annotations
 
-import pytest
 from ragmortem.diagnose import ObservedExecution, RAGDiagnoser
 from ragmortem.support import (
-    CandidateSupport,
-    CorpusSupportReport,
-    QuestionProfile,
     SupportClassification,
     evaluate_candidate_support,
     evaluate_corpus_answerability,
     extract_question_profile,
 )
 from ragmortem.taxonomy import FailureType
-from ragmortem.types import Chunk, RagResult
+from ragmortem.types import Chunk
 
 
 class MockApp:

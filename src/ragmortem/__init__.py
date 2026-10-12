@@ -6,6 +6,11 @@ from ragmortem.taxonomy import FailureType
 from ragmortem.trace import Trace, trace
 from ragmortem.diagnose import DiagnosticResult
 from ragmortem.api import diagnose
+from ragmortem.retrieval import (
+    CorpusRetriever,
+    load_corpus_from_directory,
+    parse_chunks_from_markdown,
+)
 
 __version__ = "0.1.0"
 
@@ -18,5 +23,8 @@ __all__ = [
     "RagResult",
     "RagAdapter",
     "FailureType",
+    "CorpusRetriever",
+    "load_corpus_from_directory",
+    "parse_chunks_from_markdown",
     "__version__",
 ]

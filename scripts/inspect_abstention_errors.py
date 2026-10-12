@@ -1,5 +1,12 @@
 import json
+import sys
 from pathlib import Path
+
+# Ensure workspace root is in sys.path
+repo_root = Path(__file__).resolve().parent.parent
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
+
 from examples.reference_rag.app import ReferenceRagApp
 
 HIDDEN_DOCS_DIR = Path("examples/hidden_holdout_rag/documents")

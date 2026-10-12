@@ -4,12 +4,10 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any, Sequence, TYPE_CHECKING
+from typing import Any, Sequence
 
 import numpy as np
 
-if TYPE_CHECKING:
-    from examples.reference_rag.app import ReferenceRagApp
 from ragmortem.faults.eval import is_abstaining, is_answer_correct, validate_fault_case
 from ragmortem.faults.models import (
     BaselineExecution,
@@ -108,7 +106,7 @@ HALLUCINATED_UNANSWERABLE_ANSWERS: dict[str, list[str]] = {
 class FaultInjector:
     """Deterministic fault injector for reference RAG pipelines."""
 
-    def __init__(self, app: ReferenceRagApp) -> None:
+    def __init__(self, app: Any) -> None:
         self.app = app
         self.corpus_chunk_ids = {c.id for c in self.app.chunks}
 
@@ -422,7 +420,7 @@ class FaultInjector:
 
 def generate_fault_dataset(
     questions: Sequence[dict[str, Any]],
-    app: ReferenceRagApp,
+    app: Any,
     seed: int = 42,
     top_k: int = 3,
 ) -> list[InjectedFaultCase]:

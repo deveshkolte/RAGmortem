@@ -8,19 +8,14 @@ Supports three diagnostic operating modes:
 
 from __future__ import annotations
 
-import sys
 from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Sequence, TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from examples.reference_rag.app import ReferenceRagApp
+from typing import Any, Sequence
 
 from ragmortem.faults.eval import is_abstaining, is_answer_correct
 from ragmortem.faults.models import InjectedFaultCase
 from ragmortem.taxonomy import FailureType
 from ragmortem.types import Chunk, RagResult
-from ragmortem.support import evaluate_corpus_answerability, SupportClassification, CorpusSupportReport
+from ragmortem.support import evaluate_corpus_answerability, SupportClassification
 
 
 @dataclass
@@ -59,15 +54,91 @@ class ObservedExecution:
         """Construct ObservedExecution, safely dropping any benchmark labels."""
         raw_metadata = data.get("metadata", {})
         clean_metadata = {k: v for k, v in raw_metadata.items() if not k.startswith("injected_")}
-        ret_ids = list(data.get("retrieved_chunk_ids") or data.get("retrieved_ids", []))
-        cand_ids = data.get("candidate_chunk_ids") or data.get("candidate_retrieved_ids")
+
+        # Extract retrieved chunk IDs flexibly from retrieved_chunk_ids, retrieved_ids, or retrieved_chunks
+        raw_ret = (
+            data.get("retrieved_chunk_ids")
+            or data.get("retrieved_ids")
+            or data.get("retrieved_chunks", [])
+        )
+        ret_ids: list[str] = []
+        extracted_scores: list[float] = []
+        chunk_texts: dict[str, str] = dict(clean_metadata.get("chunk_texts", {}))
+        can_extract_scores = True
+        for i, item in enumerate(raw_ret):
+            if isinstance(item, dict):
+                cid = str(item.get("id") or item.get("chunk_id") or f"chunk_{i}")
+                ret_ids.append(cid)
+                txt = item.get("text") or item.get("content")
+                if txt and cid not in chunk_texts:
+                    chunk_texts[cid] = str(txt)
+                if can_extract_scores:
+                    s = item.get("score")
+                    if s is not None:
+                        try:
+                            extracted_scores.append(float(s))
+                        except (ValueError, TypeError):
+                            can_extract_scores = False
+                    else:
+                        can_extract_scores = False
+            elif hasattr(item, "id"):
+                cid = str(item.id)
+                ret_ids.append(cid)
+                if hasattr(item, "text") and item.text and cid not in chunk_texts:
+                    chunk_texts[cid] = str(item.text)
+                can_extract_scores = False
+            else:
+                ret_ids.append(str(item))
+                can_extract_scores = False
+
+        # Extract candidate chunk IDs flexibly
+        raw_cand = (
+            data.get("candidate_chunk_ids")
+            or data.get("candidate_retrieved_ids")
+            or data.get("candidate_chunks")
+        )
+        cand_ids: list[str] | None = None
+        if raw_cand is not None:
+            cand_ids = []
+            for i, item in enumerate(raw_cand):
+                if isinstance(item, dict):
+                    cid = str(item.get("id") or item.get("chunk_id") or f"chunk_{i}")
+                    cand_ids.append(cid)
+                    txt = item.get("text") or item.get("content")
+                    if txt and cid not in chunk_texts:
+                        chunk_texts[cid] = str(txt)
+                elif hasattr(item, "id"):
+                    cid = str(item.id)
+                    cand_ids.append(cid)
+                    if hasattr(item, "text") and item.text and cid not in chunk_texts:
+                        chunk_texts[cid] = str(item.text)
+                else:
+                    cand_ids.append(str(item))
+
+        # Scores
+        if data.get("scores") is not None:
+            scores = [float(s) for s in data["scores"]]
+        elif can_extract_scores and len(extracted_scores) == len(ret_ids) and ret_ids:
+            scores = extracted_scores
+        else:
+            scores = None
+
+        cand_scores = data.get("candidate_scores")
+        if cand_scores is not None:
+            cand_scores = [float(s) for s in cand_scores]
+
+        if chunk_texts:
+            clean_metadata["chunk_texts"] = chunk_texts
+
+        question = str(data.get("question") or data.get("query") or "")
+
         return cls(
-            question=str(data["question"]),
+            question=question,
             retrieved_chunk_ids=ret_ids,
             generated_answer=str(data.get("generated_answer") or data.get("answer", "")),
-            candidate_chunk_ids=list(cand_ids) if cand_ids is not None else None,
-            scores=list(data["scores"]) if data.get("scores") is not None else None,
-            candidate_scores=list(data["candidate_scores"]) if data.get("candidate_scores") is not None else None,
+            candidate_chunk_ids=cand_ids,
+            scores=scores,
+            candidate_scores=cand_scores,
             top_k=int(data.get("top_k", len(ret_ids) if ret_ids else 3)),
             case_id=data.get("case_id"),
             metadata=clean_metadata,
@@ -400,7 +471,7 @@ class RAGDiagnoser:
 
     def __init__(
         self,
-        app: ReferenceRagApp | None = None,
+        app: Any = None,
         corpus_chunks: list[Chunk] | None = None,
         score_margin_threshold: float = 0.05,
         ambiguity_band: tuple[float, float] = (0.47, 0.53),
@@ -881,12 +952,20 @@ class RAGDiagnoser:
         # 3. Check if any top-k context chunk contains the reference answer
         ref_in_topk = False
         matching_topk_id = None
+        chunk_texts = trace.metadata.get("chunk_texts", {})
         for cid in trace.retrieved_chunk_ids:
             chunk = self.chunks_by_id.get(cid)
-            if chunk and is_answer_correct(chunk.text, reference_answer):
+            chunk_text = chunk.text if chunk else chunk_texts.get(cid)
+            if chunk_text and is_answer_correct(chunk_text, reference_answer):
                 ref_in_topk = True
                 matching_topk_id = cid
                 break
+
+        # Check prompt context string directly if chunk texts were not matched individually
+        if not ref_in_topk and trace.metadata.get("context"):
+            if is_answer_correct(trace.metadata["context"], reference_answer):
+                ref_in_topk = True
+                matching_topk_id = "prompt_context"
 
         if ref_in_topk:
             evidence.append(
@@ -915,7 +994,8 @@ class RAGDiagnoser:
         for rank_idx, cid in enumerate(cand_ids, start=1):
             if rank_idx > trace.top_k:
                 chunk = self.chunks_by_id.get(cid)
-                if chunk and is_answer_correct(chunk.text, reference_answer):
+                chunk_text = chunk.text if chunk else chunk_texts.get(cid)
+                if chunk_text and is_answer_correct(chunk_text, reference_answer):
                     ref_in_candidate = True
                     matching_cand_id = cid
                     matching_cand_rank = rank_idx
@@ -943,40 +1023,56 @@ class RAGDiagnoser:
             )
 
         # 5. Check if reference answer exists in broader corpus
-        ref_in_corpus = False
-        matching_corpus_id = None
-        for cid, chunk in self.chunks_by_id.items():
-            if is_answer_correct(chunk.text, reference_answer):
-                ref_in_corpus = True
-                matching_corpus_id = cid
-                break
+        if self.chunks_by_id:
+            ref_in_corpus = False
+            matching_corpus_id = None
+            for cid, chunk in self.chunks_by_id.items():
+                if is_answer_correct(chunk.text, reference_answer):
+                    ref_in_corpus = True
+                    matching_corpus_id = cid
+                    break
 
-        if ref_in_corpus:
-            evidence.append(
-                f"Corpus contains supporting document '{matching_corpus_id}', but retriever failed to return it in candidate pool."
-            )
-            evidence.append(
-                "Root cause: Retriever failed to locate evidence document present in the corpus."
-            )
-            return DiagnosticResult(
-                diagnosis=FailureType.RETRIEVAL_MISS,
-                confidence=1.0,
-                evidence=evidence,
-                mode="reference_assisted",
-                is_suspected=False,
-                signals=signals,
-            )
+            if ref_in_corpus:
+                evidence.append(
+                    f"Corpus contains supporting document '{matching_corpus_id}', but retriever failed to return it in candidate pool."
+                )
+                evidence.append(
+                    "Root cause: Retriever failed to locate evidence document present in the corpus."
+                )
+                return DiagnosticResult(
+                    diagnosis=FailureType.RETRIEVAL_MISS,
+                    confidence=1.0,
+                    evidence=evidence,
+                    mode="reference_assisted",
+                    is_suspected=False,
+                    signals=signals,
+                )
+            else:
+                evidence.append(
+                    f"Supplied reference answer '{reference_answer}' was not found in any corpus document."
+                )
+                evidence.append("Root cause: Corpus does not support question; system should have abstained.")
+                return DiagnosticResult(
+                    diagnosis=FailureType.SHOULD_ABSTAIN,
+                    confidence=0.90,
+                    evidence=evidence,
+                    mode="reference_assisted",
+                    is_suspected=False,
+                    signals=signals,
+                )
         else:
             evidence.append(
-                f"Supplied reference answer '{reference_answer}' was not found in any corpus document."
+                f"Supplied reference answer '{reference_answer}' was not found in retrieved context, and corpus index was not provided."
             )
-            evidence.append("Root cause: Corpus does not support question; system should have abstained.")
+            evidence.append(
+                "Cannot determine whether reference answer exists in corpus or question is unanswerable without corpus index."
+            )
             return DiagnosticResult(
-                diagnosis=FailureType.SHOULD_ABSTAIN,
-                confidence=0.90,
+                diagnosis=FailureType.UNKNOWN,
+                confidence=0.50,
                 evidence=evidence,
                 mode="reference_assisted",
-                is_suspected=False,
+                is_suspected=True,
                 signals=signals,
             )
 

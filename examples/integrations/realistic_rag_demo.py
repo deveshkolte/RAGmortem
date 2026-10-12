@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any
 
 # Ensure workspace root and src/ are in sys.path
 repo_root = Path(__file__).resolve().parent.parent.parent
@@ -23,7 +22,7 @@ if str(repo_root / "src") not in sys.path:
 import numpy as np
 from sentence_transformers import SentenceTransformer
 
-from ragmortem import Chunk, FailureType, diagnose, trace
+from ragmortem import Chunk, diagnose, trace
 
 
 # =============================================================================

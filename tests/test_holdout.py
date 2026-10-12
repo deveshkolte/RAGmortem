@@ -2,7 +2,6 @@
 
 import json
 from pathlib import Path
-import pytest
 
 from examples.reference_rag.app import load_corpus_from_directory, ReferenceRagApp
 from ragmortem.diagnose import RAGDiagnoser, ObservedExecution

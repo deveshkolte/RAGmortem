@@ -238,13 +238,6 @@ def evaluate_corpus_answerability(
     top_support = evaluate_candidate_support(profile, top_chunk, top_score)
     top_coverage = top_support.term_coverage
 
-    # Check secondary candidates if available
-    secondary_coverages = [
-        evaluate_candidate_support(profile, c, s).term_coverage
-        for c, s in zip(candidates[1:3], scores[1:3])
-    ]
-    max_coverage = max([top_coverage] + secondary_coverages) if secondary_coverages else top_coverage
-
     # Terminology trap detection:
     # A candidate retrieved with elevated similarity due to background jargon,
     # but lacking the query's core requested entity/attribute.

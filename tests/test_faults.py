@@ -4,14 +4,13 @@ from pathlib import Path
 
 import pytest
 
-from examples.reference_rag.app import ReferenceRagApp, load_corpus_from_directory
+from examples.reference_rag.app import ReferenceRagApp
 from ragmortem.dataset import load_questions
 from ragmortem.faults.eval import is_abstaining, is_answer_correct, validate_fault_case
 from ragmortem.faults.inject import (
     FaultInjector,
     generate_fault_dataset,
     load_injected_faults,
-    save_injected_faults,
 )
 from ragmortem.faults.models import (
     BaselineExecution,

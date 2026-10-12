@@ -6,14 +6,17 @@ A debugger for RAG apps: it finds why an answer went wrong — retrieval, rankin
 > RAGmortem is an experimental, deterministic root-cause failure diagnoser for RAG pipelines. It isolates failures across retrieval, ranking, generation, and abstention without requiring an external LLM judge.
 
 ```python
-from ragmortem import diagnose
+from ragmortem import diagnose, Chunk
 
 # 20-second quickstart: diagnose an execution trace directly
 result = diagnose(
     query="What is the mandatory engineering response time for a P1 incident?",
     retrieved_chunks=[{"id": "doc_dr", "text": "Disaster recovery drills occur quarterly.", "score": 0.14}],
     answer="Engineers must run quarterly disaster recovery exercises.",
-    corpus="examples/reference_rag/documents",
+    corpus=[
+        Chunk(id="chunk_incident_severity_p1", text="P1 (Critical) incidents require acknowledgment within 15 minutes.", source="policy"),
+        Chunk(id="chunk_dr_drill", text="Disaster recovery drills occur quarterly.", source="policy"),
+    ],
     mode="corpus_aware",
 )
 
@@ -84,12 +87,21 @@ RAGmortem uses an uncertainty-aware decision tree operating on observable execut
 
 Requires **Python >= 3.11**.
 
+Install from GitHub:
 ```bash
+pip install git+https://github.com/deveshkolte/RAGmortem.git
+```
+
+Or for local development / testing:
+```bash
+git clone https://github.com/deveshkolte/RAGmortem.git
+cd RAGmortem
 pip install -e .
 ```
 
-Verify in a clean Python process:
+Verify in a clean terminal:
 ```bash
+ragmortem --help
 python -c "import ragmortem; print(ragmortem.__version__)"
 ```
 
@@ -123,18 +135,37 @@ Missing fields are never silently fabricated (missing scores, context, or answer
 RAGmortem supports two explicit modes (**never silently switches between them**):
 
 #### Mode A: Trace-Only (Offline APM / Logs)
+Zero knowledge-base dependencies. Evaluates observable trace telemetry directly:
 ```python
 result = diagnose(t, mode="trace_only")
-print(result.failure_type)        # FailureType.UNKNOWN
+print(result.failure_type)        # FailureType.UNKNOWN (safely avoids guessing)
 print(result.recommended_action) # Explains missing corpus access
 ```
 
 #### Mode B: Corpus-Aware (Knowledge Base Probing)
+Probes the corpus index to disambiguate whether documents were missing or the question was unanswerable.
+Accepts three input formats:
+
+**1. Directory path of markdown files:**
 ```python
-result = diagnose(t, corpus="examples/reference_rag/documents", mode="corpus_aware")
-print(result.failure_type)        # FailureType.RETRIEVAL_SUSPECTED
-print(result.evidence_score)     # 0.94
-print(result.recommended_action) # Increase retrieval recall / candidate pool
+result = diagnose(t, corpus="path/to/markdown/documents", mode="corpus_aware")
+```
+
+**2. In-memory list of `Chunk` objects (or dicts):**
+```python
+from ragmortem import Chunk
+
+corpus = [
+    Chunk(id="doc_p1", text="P1 incidents require 15-minute response.", source="policy"),
+    Chunk(id="doc_dr", text="Disaster recovery drills occur quarterly.", source="policy"),
+]
+result = diagnose(t, corpus=corpus, mode="corpus_aware")
+```
+
+**3. Custom retriever adapter (`.retrieve(query, k)`):**
+```python
+# Any object implementing .retrieve(query: str, k: int) -> tuple[list[Chunk], list[float]]
+result = diagnose(t, corpus=my_custom_retriever, mode="corpus_aware")
 ```
 
 ### Complete Integration Demonstrations
@@ -154,14 +185,14 @@ python examples/integrations/realistic_rag_demo.py
 Diagnose saved JSON trace files from the terminal:
 
 ```bash
-# Trace-only mode (offline APM logs)
+# Trace-only mode (offline APM logs, no corpus needed)
 ragmortem diagnose-trace trace.json
 
-# Corpus-aware mode (with documents directory)
-ragmortem diagnose-trace trace.json --corpus examples/reference_rag/documents
+# Corpus-aware mode (with a documents directory)
+ragmortem diagnose-trace trace.json --corpus path/to/documents
 
 # Structured JSON output
-ragmortem diagnose-trace trace.json --json
+ragmortem diagnose-trace trace.json --corpus path/to/documents --json
 ```
 
 ### Standard JSON Trace Schema
@@ -234,7 +265,7 @@ Run the full offline test suite:
 pytest tests/ -v
 ```
 
-All 102 tests run 100% offline on CPU without network requests or API keys.
+All 124 tests run 100% offline on CPU without network requests or API keys.
 
 ---
 

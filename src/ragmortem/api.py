@@ -6,9 +6,7 @@ from pathlib import Path
 from typing import Any, Sequence
 
 from ragmortem.diagnose import DiagnosticResult, ObservedExecution, RAGDiagnoser
-from ragmortem.taxonomy import FailureType
 from ragmortem.trace import Trace, trace
-from ragmortem.types import Chunk, RagResult
 
 
 def diagnose(
@@ -123,13 +121,13 @@ def diagnose(
         if hasattr(target_corpus, "retrieve"):
             corpus_app = target_corpus
         elif isinstance(target_corpus, (str, Path)):
-            from examples.reference_rag.app import ReferenceRagApp
+            from ragmortem.retrieval import CorpusRetriever
 
-            corpus_app = ReferenceRagApp(corpus_dir=target_corpus, mock_mode=True)
+            corpus_app = CorpusRetriever(corpus=target_corpus)
         elif isinstance(target_corpus, Sequence):
-            from examples.reference_rag.app import ReferenceRagApp
+            from ragmortem.retrieval import CorpusRetriever
 
-            corpus_app = ReferenceRagApp(chunks=list(target_corpus), mock_mode=True)
+            corpus_app = CorpusRetriever(corpus=list(target_corpus))
         else:
             corpus_app = target_corpus
 

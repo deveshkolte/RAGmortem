@@ -6,13 +6,17 @@ Evaluates across development, validation, and frozen final_holdout splits.
 from __future__ import annotations
 
 import json
+import sys
 from pathlib import Path
 from typing import Any
-from collections import defaultdict
+
+# Ensure workspace root is in sys.path
+repo_root = Path(__file__).resolve().parent.parent
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
 
 from examples.reference_rag.app import ReferenceRagApp
 from ragmortem.diagnose import RAGDiagnoser, ObservedExecution
-from ragmortem.taxonomy import FailureType
 
 FINANCE_DOCS_DIR = Path("examples/finance_rag/documents")
 HOLDOUT_DATA_PATH = Path("evals/abstention_holdout.jsonl")
@@ -204,11 +208,11 @@ def main():
 
     # 1. Development split
     res_dev_corpus = evaluate_split(dev_cases, diag_corpus, "corpus_aware", "development")
-    res_dev_trace = evaluate_split(dev_cases, diag_trace, "trace_only", "development")
+    evaluate_split(dev_cases, diag_trace, "trace_only", "development")
 
     # 2. Validation split
     res_val_corpus = evaluate_split(val_cases, diag_corpus, "corpus_aware", "validation")
-    res_val_trace = evaluate_split(val_cases, diag_trace, "trace_only", "validation")
+    evaluate_split(val_cases, diag_trace, "trace_only", "validation")
 
     # 3. Final Holdout split (evaluated once on frozen code)
     res_holdout_corpus = evaluate_split(holdout_cases, diag_corpus, "corpus_aware", "final_holdout")

@@ -3,7 +3,7 @@
 import json
 from pathlib import Path
 
-from ragmortem.dataset import load_questions, validate_dataset
+from ragmortem.dataset import validate_dataset
 from ragmortem.types import Chunk
 
 

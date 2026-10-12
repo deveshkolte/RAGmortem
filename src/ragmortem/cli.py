@@ -6,19 +6,25 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Sequence
-
-# Ensure workspace root is accessible for loading examples
-repo_root = Path(__file__).resolve().parent.parent.parent
-if str(repo_root) not in sys.path:
-    sys.path.insert(0, str(repo_root))
+from typing import Any, Sequence
 
 from ragmortem.dataset import load_questions, validate_dataset
-try:
-    from examples.reference_rag.app import ReferenceRagApp, load_corpus_from_directory
-except ImportError:
-    ReferenceRagApp = None  # type: ignore
-    load_corpus_from_directory = None  # type: ignore
+from ragmortem.retrieval import CorpusRetriever, load_corpus_from_directory
+
+# ReferenceRagApp is only needed for full end-to-end pipeline commands (run-reference,
+# generate-faults, etc.) which require the development checkout.  For corpus-aware
+# diagnosis the packaged CorpusRetriever is used instead.
+def _get_reference_rag_app() -> Any:
+    """Load ReferenceRagApp if available in a local development checkout."""
+    try:
+        _repo_root = Path(__file__).resolve().parent.parent.parent
+        if str(_repo_root) not in sys.path and (_repo_root / "examples").is_dir():
+            sys.path.insert(0, str(_repo_root))
+        import importlib
+        mod = importlib.import_module("examples.reference_rag.app")
+        return getattr(mod, "ReferenceRagApp", None)
+    except (ImportError, ModuleNotFoundError):
+        return None
 
 
 
@@ -76,6 +82,11 @@ def cmd_run_reference(args: argparse.Namespace) -> int:
     print(f"Top-K:         {args.top_k}")
     print(f"Mock Mode:     {args.mock}")
     print("=" * 70)
+
+    ReferenceRagApp = _get_reference_rag_app()
+    if ReferenceRagApp is None:
+        print("Error: run-reference requires the development environment with examples/.", file=sys.stderr)
+        return 1
 
     app = ReferenceRagApp(
         corpus_dir=corpus_dir,
@@ -155,6 +166,10 @@ def cmd_generate_faults(args: argparse.Namespace) -> int:
     from ragmortem.faults.inject import generate_fault_dataset, save_injected_faults
 
     print("Generating controlled failures...")
+    ReferenceRagApp = _get_reference_rag_app()
+    if ReferenceRagApp is None:
+        print("Error: generate-faults requires the development environment with examples/.", file=sys.stderr)
+        return 1
     questions = load_questions(questions_path)
     app = ReferenceRagApp(corpus_dir=corpus_dir, top_k=args.top_k, mock_mode=True)
 
@@ -253,7 +268,14 @@ def cmd_diagnose(args: argparse.Namespace) -> int:
 
     from ragmortem.diagnose import ExecutionTrace, ObservedExecution, RAGDiagnoser
 
-    app = ReferenceRagApp(corpus_dir=corpus_dir, mock_mode=True)
+    ReferenceRagApp = _get_reference_rag_app()
+    if ReferenceRagApp is not None:
+        app = ReferenceRagApp(corpus_dir=corpus_dir, mock_mode=True)
+    else:
+        if args.mode == "oracle":
+            print("Error: Oracle evaluation mode requires the development environment with ReferenceRagApp.", file=sys.stderr)
+            return 1
+        app = CorpusRetriever(corpus=corpus_dir)
     diagnoser = RAGDiagnoser(app=app)
 
     raw_items: list[dict[str, Any]] = []
@@ -424,6 +446,10 @@ def cmd_evaluate_diagnoser(args: argparse.Namespace) -> int:
     )
     from ragmortem.faults.inject import load_injected_faults
 
+    ReferenceRagApp = _get_reference_rag_app()
+    if ReferenceRagApp is None:
+        print("Error: evaluate-diagnoser requires the development environment with ReferenceRagApp.", file=sys.stderr)
+        return 1
     app = ReferenceRagApp(corpus_dir=corpus_dir, mock_mode=True)
     diagnoser = RAGDiagnoser(app=app)
     cases = load_injected_faults(faults_path)

@@ -125,6 +125,21 @@ class Trace:
         if self.ranks is not None:
             clean_meta["ranks"] = list(self.ranks)
 
+        chunk_texts: dict[str, str] = {}
+        for i, c in enumerate(self.retrieved_chunks):
+            cid = _extract_chunk_id(c, i)
+            ctext = _extract_chunk_text(c)
+            if ctext:
+                chunk_texts[cid] = ctext
+        if self.candidate_chunks:
+            for i, c in enumerate(self.candidate_chunks):
+                cid = _extract_chunk_id(c, i)
+                ctext = _extract_chunk_text(c)
+                if ctext and cid not in chunk_texts:
+                    chunk_texts[cid] = ctext
+        if chunk_texts:
+            clean_meta["chunk_texts"] = chunk_texts
+
         eff_top_k = self.top_k
         if eff_top_k is None:
             eff_top_k = len(self.retrieved_chunks) if self.retrieved_chunks else 3

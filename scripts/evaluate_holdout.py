@@ -1,15 +1,19 @@
 """Evaluate frozen observational diagnoser on holdout dataset in both Trace+Corpus and Trace-Only modes."""
 
 import json
+import sys
 from pathlib import Path
-from typing import Any, Sequence
-from collections import defaultdict
+from typing import Any
+
+# Ensure workspace root is in sys.path
+repo_root = Path(__file__).resolve().parent.parent
+if str(repo_root) not in sys.path:
+    sys.path.insert(0, str(repo_root))
 
 from examples.reference_rag.app import ReferenceRagApp
 from ragmortem.diagnose import RAGDiagnoser, ObservedExecution
 from ragmortem.faults.inject import load_injected_faults
 from ragmortem.faults.models import InjectedFaultCase
-from ragmortem.taxonomy import FailureType
 
 HOLDOUT_DOCS_DIR = Path("examples/holdout_rag/documents")
 FAULTS_PATH = Path("evals/holdout_faults.jsonl")

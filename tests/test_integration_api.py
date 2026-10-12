@@ -7,8 +7,7 @@ from pathlib import Path
 import pytest
 
 import ragmortem
-from ragmortem import Chunk, FailureType, RagResult, diagnose, trace
-from ragmortem.diagnose import DiagnosticResult
+from ragmortem import Chunk, FailureType, diagnose, trace
 from ragmortem.trace import Trace
 from examples.reference_rag.app import ReferenceRagApp
 
@@ -315,3 +314,73 @@ def test_cli_diagnose_trace_command(tmp_path: Path) -> None:
     # Run CLI with --json output
     exit_code_json = main(["diagnose-trace", str(trace_file), "--mode", "trace_only", "--json"])
     assert exit_code_json == 0
+
+
+def test_reference_assisted_with_chunk_text_no_corpus() -> None:
+    """Reference-assisted mode must detect GENERATION_PROVEN from chunk texts even without corpus."""
+    result = diagnose(
+        query="What is the P1 SLA?",
+        retrieved_chunks=[
+            Chunk(id="c1", text="The mandatory response SLA for P1 incidents is 15 minutes.", source="doc")
+        ],
+        scores=[0.85],
+        answer="The SLA is 24 hours.",
+        reference_answer="15 minutes",
+    )
+    assert result.failure_type == FailureType.GENERATION_PROVEN
+    assert result.evidence_score == 1.0
+
+
+def test_reference_assisted_missing_corpus_returns_unknown() -> None:
+    """When reference answer is not in retrieved context and no corpus is provided, return UNKNOWN."""
+    result = diagnose(
+        query="What is the P1 SLA?",
+        retrieved_chunks=[
+            {"id": "c1", "text": "Disaster recovery drills occur quarterly.", "score": 0.14}
+        ],
+        scores=[0.14],
+        answer="The SLA is 24 hours.",
+        reference_answer="15 minutes",
+    )
+    assert result.failure_type == FailureType.UNKNOWN
+    assert result.mode == "reference_assisted"
+    assert any("corpus index was not provided" in ev.lower() for ev in result.evidence)
+
+
+def test_observed_execution_from_dict_flexible_schema() -> None:
+    """ObservedExecution.from_dict must support query, retrieved_chunks dicts, and score extraction."""
+    from ragmortem.diagnose import ObservedExecution
+
+    trace_data = {
+        "query": "What is the P1 SLA?",
+        "retrieved_chunks": [
+            {"id": "doc_1", "text": "15 minutes response", "score": 0.88},
+            {"id": "doc_2", "text": "Other policy", "score": 0.42},
+        ],
+        "answer": "15 minutes",
+    }
+    obs = ObservedExecution.from_dict(trace_data)
+    assert obs.question == "What is the P1 SLA?"
+    assert obs.retrieved_chunk_ids == ["doc_1", "doc_2"]
+    assert obs.scores == [0.88, 0.42]
+    assert obs.metadata.get("chunk_texts", {}).get("doc_1") == "15 minutes response"
+
+
+def test_cli_diagnose_command_with_query_schema(tmp_path: Path) -> None:
+    """CLI diagnose command must succeed with standard trace schema containing 'query'."""
+    from ragmortem.cli import main
+
+    trace_file = tmp_path / "trace_query.json"
+    trace_data = {
+        "query": "What is the P1 SLA?",
+        "retrieved_chunks": [
+            {"id": "chunk_incident_severity_p1", "text": "15 minutes", "score": 0.85}
+        ],
+        "scores": [0.85],
+        "answer": "15 minutes",
+    }
+    trace_file.write_text(json.dumps(trace_data), encoding="utf-8")
+
+    exit_code = main(["diagnose", str(trace_file), "--corpus", str(DOCS_DIR)])
+    assert exit_code == 0
+
