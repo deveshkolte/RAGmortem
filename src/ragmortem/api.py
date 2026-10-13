@@ -29,6 +29,7 @@ def diagnose(
     metadata: dict[str, Any] | None = None,
     reference_answer: str | None = None,
     app: Any | None = None,
+    score_type: str | None = None,
 ) -> DiagnosticResult:
     """Diagnose root cause of failure for a RAG execution trace.
 
@@ -87,10 +88,27 @@ def diagnose(
     if trace_input is not None:
         if isinstance(trace_input, Trace):
             t = trace_input
+            if score_type is not None:
+                t = Trace(
+                    query=t.query,
+                    retrieved_chunks=t.retrieved_chunks,
+                    scores=t.scores,
+                    ranks=t.ranks,
+                    context=t.context,
+                    answer=t.answer,
+                    candidate_chunks=t.candidate_chunks,
+                    candidate_scores=t.candidate_scores,
+                    model=t.model,
+                    latency_ms=t.latency_ms,
+                    top_k=t.top_k,
+                    case_id=t.case_id,
+                    metadata=t.metadata,
+                    score_type=score_type,
+                )
         elif isinstance(trace_input, ObservedExecution):
             t = Trace(
                 query=trace_input.question,
-                retrieved_chunks=list(trace_input.retrieved_chunk_ids),
+                retrieved_chunk_ids=list(trace_input.retrieved_chunk_ids),
                 scores=trace_input.scores,
                 answer=trace_input.generated_answer,
                 candidate_chunks=trace_input.candidate_chunk_ids,
@@ -98,11 +116,16 @@ def diagnose(
                 top_k=trace_input.top_k,
                 case_id=trace_input.case_id,
                 metadata=trace_input.metadata,
+                score_type=score_type or trace_input.score_type,
             )
         elif isinstance(trace_input, dict):
             t = Trace.from_dict(trace_input)
+            if score_type is not None:
+                t.score_type = score_type
         elif isinstance(trace_input, (str, Path)):
             t = Trace.from_json(trace_input)
+            if score_type is not None:
+                t.score_type = score_type
         else:
             raise TypeError(
                 f"Unsupported trace input type: {type(trace_input)}. "
@@ -123,6 +146,7 @@ def diagnose(
             top_k=top_k,
             case_id=case_id,
             metadata=metadata,
+            score_type=score_type or "similarity",
         )
 
     # 2. Resolve Diagnostic Mode
