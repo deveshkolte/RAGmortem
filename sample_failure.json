@@ -1,0 +1,13 @@
+{
+  "id": "query_failure_101",
+  "question": "What is our company annual rollover policy for unused PTO days?",
+  "answer": "All unused PTO days rollover indefinitely up to 100 days.",
+  "retrieved": [
+    {
+      "chunk_id": "hr_policy_sec_4",
+      "text": "Employees can rollover a maximum of 5 unused PTO days into the following calendar year. All other unused days expire on December 31st.",
+      "score": 0.89
+    }
+  ],
+  "reference_answer": "maximum of 5 unused PTO days"
+}

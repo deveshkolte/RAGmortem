@@ -215,3 +215,39 @@ def test_cli_bad_input_missing_required_fields(tmp_path: Path) -> None:
         exit_code = main(["diagnose", str(missing_q)])
     assert exit_code == 2
     assert "missing required field" in buf_err.getvalue()
+
+
+def test_cli_diagnose_format_html(tmp_path: Path) -> None:
+    """Diagnose with --format html produces standalone executive HTML report."""
+    case = {
+        "id": "html_test_case",
+        "question": "What is the policy?",
+        "answer": "Policy answer.",
+        "retrieved": [{"chunk_id": "c1", "text": "Policy chunk content.", "score": 0.88}],
+        "reference_answer": "Policy chunk content.",
+    }
+    input_file = tmp_path / "case.json"
+    input_file.write_text(json.dumps(case), encoding="utf-8")
+    out_html = tmp_path / "report.html"
+
+    exit_code = main(["diagnose", str(input_file), "--format", "html", "--out", str(out_html)])
+    assert exit_code == 0
+    assert out_html.exists()
+    content = out_html.read_text(encoding="utf-8")
+    assert "<!DOCTYPE html>" in content
+    assert "RAGmortem Enterprise Diagnostic Audit" in content
+    assert "html_test_case" in content
+    assert "Stage 1: User Query" in content
+    assert "Forensic 4-Stage RAG Pipeline" in content
+
+
+def test_cli_demo_format_html(tmp_path: Path) -> None:
+    """Demo with --format html produces standalone executive HTML report."""
+    out_html = tmp_path / "demo_report.html"
+    exit_code = main(["demo", "--format", "html", "--out", str(out_html)])
+    assert exit_code == 0
+    assert out_html.exists()
+    content = out_html.read_text(encoding="utf-8")
+    assert "<!DOCTYPE html>" in content
+    assert "Synthetic Demonstration Data" in content
+    assert "Total Traces Audited" in content
