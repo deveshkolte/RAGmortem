@@ -32,11 +32,22 @@ def diagnose(
 ) -> DiagnosticResult:
     """Diagnose root cause of failure for a RAG execution trace.
 
-    Supports two explicit modes:
-    1. 'corpus_aware' (or 'corpus-aware'): Audits corpus index when retrieval scores are low.
-    2. 'trace_only' (or 'trace-only'): Evaluates observable telemetry without accessing corpus.
+    Three diagnostic scopes are supported (never silently switches between them):
 
-    Never silently switches between modes. Missing telemetry produces UNKNOWN rather
+    1. **trace_only** (or `trace-only`): Evaluates observable telemetry without accessing corpus.
+       Returns `UNKNOWN` when evidence is insufficient. No corpus, no reference answer.
+
+    2. **corpus_aware** (or `corpus-aware`) **without** `reference_answer`: Audits corpus index
+       when retrieval scores are low. Uses heuristic score thresholds and corpus audit to return
+       *suspected* failure types (`GENERATION_SUSPECTED`, `RETRIEVAL_SUSPECTED`, etc.).
+       **Does not verify factual correctness** of the generated answer.
+
+    3. **corpus_aware** (or `corpus-aware`) **with** `reference_answer`: Definitive diagnosis.
+       Compares generated answer to `reference_answer`, searches retrieved and candidate chunks
+       for supporting evidence. Returns definitive types (`NO_FAILURE`, `GENERATION_PROVEN`,
+       `RETRIEVAL_MISS`, `RANKING_MISS`, `SHOULD_ABSTAIN`) or `UNKNOWN`.
+
+    Never silently switches between scopes. Missing telemetry produces `UNKNOWN` rather
     than fabricated evidence.
 
     Example (trace-only):
@@ -47,7 +58,7 @@ def diagnose(
             mode="trace_only",
         )
 
-    Example (corpus-aware):
+    Example (corpus-aware observed — heuristic suspicions):
         result = diagnose(
             query="What is the P1 SLA?",
             retrieved_chunks=[{"id": "doc1", "text": "...", "score": 0.12}],
@@ -55,6 +66,22 @@ def diagnose(
             corpus=my_corpus_index,
             mode="corpus_aware",
         )
+
+    Example (corpus-aware reference-assisted — definitive diagnosis):
+        result = diagnose(
+            query="What is the P1 SLA?",
+            retrieved_chunks=[{"id": "doc1", "text": "...", "score": 0.12}],
+            answer="Wrong answer",
+            corpus=my_corpus_index,
+            mode="corpus_aware",
+            reference_answer="15 minutes",
+        )
+
+    **Reference-answer matching** (used only when `reference_answer` is provided):
+    - Exact token subsequence match after normalization (lowercase, punctuation removed, whitespace collapsed).
+    - Fallback: ≥80% overlap of "key tokens" (length > 2 or numeric). Numeric tokens in gold MUST be present.
+    - This is **not semantic equivalence**; paraphrased answers may not match. For best results,
+      provide `reference_answer` as a verbatim substring of a corpus chunk.
     """
     # 1. Resolve Trace representation
     if trace_input is not None:
