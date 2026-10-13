@@ -12,7 +12,7 @@ from ragmortem.retrieval import (
     parse_chunks_from_markdown,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 __all__ = [
     "diagnose",
