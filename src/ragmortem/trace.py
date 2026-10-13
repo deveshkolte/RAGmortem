@@ -57,10 +57,13 @@ class Trace:
     top_k: int | None = None
     case_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    score_type: str = "similarity"
 
     def __post_init__(self) -> None:
         if self.scores is None:
             self.scores = self.get_scores()
+        if not self.score_type:
+            self.score_type = "similarity"
 
     @property
     def question(self) -> str:
@@ -154,6 +157,7 @@ class Trace:
             top_k=eff_top_k,
             case_id=self.case_id,
             metadata=clean_meta,
+            score_type=self.score_type,
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -171,6 +175,7 @@ class Trace:
             "query": self.query,
             "retrieved_chunks": serialized_chunks,
             "answer": self.answer,
+            "score_type": self.score_type,
         }
 
         eff_scores = self.get_scores()
@@ -254,6 +259,7 @@ class Trace:
             top_k=data.get("top_k"),
             case_id=data.get("case_id"),
             metadata=meta,
+            score_type=str(data.get("score_type") or "similarity"),
         )
 
     @classmethod
@@ -280,6 +286,7 @@ class Trace:
             model=result.model,
             top_k=top_k or len(result.retrieved_chunks),
             metadata=dict(result.metadata),
+            score_type="similarity",
         )
 
 
@@ -300,6 +307,7 @@ def trace(
     top_k: int | None = None,
     case_id: str | None = None,
     metadata: dict[str, Any] | None = None,
+    score_type: str = "similarity",
 ) -> Trace:
     """Create a standardized RAG execution trace.
 
@@ -327,4 +335,5 @@ def trace(
         top_k=top_k,
         case_id=case_id,
         metadata=dict(metadata) if metadata is not None else {},
+        score_type=score_type,
     )

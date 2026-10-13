@@ -35,6 +35,7 @@ class ObservedExecution:
     top_k: int = 3
     case_id: str | None = None
     metadata: dict[str, Any] = field(default_factory=dict)
+    score_type: str = "similarity"
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -47,6 +48,7 @@ class ObservedExecution:
             "top_k": self.top_k,
             "case_id": self.case_id,
             "metadata": dict(self.metadata),
+            "score_type": self.score_type,
         }
 
     @classmethod
@@ -142,6 +144,7 @@ class ObservedExecution:
             top_k=int(data.get("top_k", len(ret_ids) if ret_ids else 3)),
             case_id=data.get("case_id"),
             metadata=clean_metadata,
+            score_type=str(data.get("score_type") or "similarity"),
         )
 
     @classmethod
@@ -157,6 +160,7 @@ class ObservedExecution:
             top_k=len(fault_exec.retrieved_ids) if fault_exec.retrieved_ids else 3,
             case_id=case.case_id,
             metadata={},
+            score_type="similarity",
         )
 
     @classmethod
@@ -170,6 +174,7 @@ class ObservedExecution:
             candidate_scores=result.candidate_scores,
             top_k=top_k,
             metadata=dict(result.metadata),
+            score_type="similarity",
         )
 
 
@@ -565,9 +570,61 @@ class RAGDiagnoser:
             limitations.append("Candidate pool prior to top-k truncation was not logged in trace.")
 
         # -------------------------------------------------------------
-        # 2. Extract Relative Telemetry Signals
+        # 2. Score-Type Validation & Conversion Guard
         # -------------------------------------------------------------
-        scores = trace.scores
+        score_type = (getattr(trace, "score_type", None) or "similarity").strip().lower()
+        if score_type not in ("similarity", "cosine_distance", "distance"):
+            raise ValueError(
+                f"Invalid score_type '{trace.score_type}'. Must be 'similarity', 'cosine_distance', or 'distance'."
+            )
+        signals["score_type"] = score_type
+
+        if score_type == "distance":
+            dist_reason = "scores are distances of unknown scale; thresholds are calibrated for cosine similarity"
+            return DiagnosticResult(
+                diagnosis=FailureType.UNKNOWN,
+                evidence_score=0.0,
+                evidence=[dist_reason],
+                reasons=[dist_reason],
+                limitations=limitations,
+                telemetry_completeness=completeness.value,
+                mode=mode,
+                signals=signals,
+            )
+
+        if score_type == "similarity":
+            all_scores = list(trace.scores)
+            if trace.candidate_scores is not None:
+                all_scores.extend(trace.candidate_scores)
+            for s in all_scores:
+                if s < -1.0 or s > 1.0:
+                    out_of_range_reason = f"scores outside valid cosine similarity range [-1.0, 1.0]; got {s}"
+                    return DiagnosticResult(
+                        diagnosis=FailureType.UNKNOWN,
+                        evidence_score=0.0,
+                        evidence=[f"Score {s} is outside valid cosine similarity range [-1.0, 1.0]."],
+                        reasons=[out_of_range_reason],
+                        limitations=limitations,
+                        telemetry_completeness=completeness.value,
+                        mode=mode,
+                        signals=signals,
+                    )
+            scores = trace.scores
+            cand_scores = trace.candidate_scores
+        elif score_type == "cosine_distance":
+            scores = [1.0 - float(s) for s in trace.scores]
+            cand_scores = (
+                [1.0 - float(s) for s in trace.candidate_scores]
+                if trace.candidate_scores is not None
+                else None
+            )
+        else:
+            scores = trace.scores
+            cand_scores = trace.candidate_scores
+
+        # -------------------------------------------------------------
+        # 3. Extract Relative Telemetry Signals
+        # -------------------------------------------------------------
         top_score = scores[0]
         last_score = scores[-1]
         score_spread = top_score - last_score if len(scores) > 1 else 0.0
@@ -587,7 +644,7 @@ class RAGDiagnoser:
         signals["has_extended_candidates"] = has_extended_candidates
 
         # -------------------------------------------------------------
-        # 3. Path A: System generated a refusal/abstention
+        # 4. Path A: System generated a refusal/abstention
         # -------------------------------------------------------------
         if is_refusal:
             # False refusal check: context score is strong
@@ -625,12 +682,11 @@ class RAGDiagnoser:
                 )
 
         # -------------------------------------------------------------
-        # 4. Path B: Substantive response generated
+        # 5. Path B: Substantive response generated
         # -------------------------------------------------------------
 
         # Check 1: Ranking Cutoff Probe
         if has_extended_candidates:
-            cand_scores = trace.candidate_scores
             if cand_scores and len(cand_scores) > top_k:
                 cutoff_gap = cand_scores[top_k - 1] - cand_scores[top_k]
             else:
@@ -1260,6 +1316,7 @@ class RAGDiagnoser:
         mode: str | None = None,
         corpus: Any | None = None,
         reference_answer: str | None = None,
+        score_type: str | None = None,
     ) -> DiagnosticResult:
         """Unified entrypoint for failure diagnosis.
         
@@ -1272,6 +1329,9 @@ class RAGDiagnoser:
         if isinstance(trace, dict):
             trace = ObservedExecution.from_dict(trace)
 
+        if score_type is not None and isinstance(trace, ObservedExecution):
+            trace.score_type = score_type
+
         if mode == "oracle" or (mode is None and isinstance(trace, ExecutionTrace)):
             if isinstance(trace, ExecutionTrace):
                 return self.diagnose_oracle(trace)
@@ -1283,6 +1343,8 @@ class RAGDiagnoser:
                 obs_trace = ObservedExecution.from_dict(trace.__dict__)
             else:
                 obs_trace = trace
+            if score_type is not None:
+                obs_trace.score_type = score_type
             if not reference_answer:
                 raise ValueError("Reference-assisted diagnosis requires a reference_answer string.")
             return self.diagnose_reference_assisted(obs_trace, reference_answer)
@@ -1291,6 +1353,9 @@ class RAGDiagnoser:
             obs_trace = ObservedExecution.from_dict(trace.__dict__)
         else:
             obs_trace = trace
+
+        if score_type is not None:
+            obs_trace.score_type = score_type
 
         effective_mode = mode or ("corpus_aware" if (corpus is not None or self.app is not None) else "trace_only")
         return self.diagnose_observed(obs_trace, mode=effective_mode, corpus=corpus)
@@ -1301,6 +1366,7 @@ def diagnose(
     corpus: Any | None = None,
     mode: str | None = None,
     reference_answer: str | None = None,
+    score_type: str | None = None,
 ) -> DiagnosticResult:
     """Convenience functional API for RAG failure diagnosis."""
     diagnoser = RAGDiagnoser(app=corpus)
@@ -1309,6 +1375,7 @@ def diagnose(
         mode=mode,
         corpus=corpus,
         reference_answer=reference_answer,
+        score_type=score_type,
     )
 
 

@@ -83,7 +83,7 @@ RAGmortem uses an uncertainty-aware decision tree operating on observable execut
 
 ---
 
-## 4. Installation
+## 4. Installation & Quickstart
 
 Requires **Python >= 3.11**.
 
@@ -92,17 +92,42 @@ Install from GitHub:
 pip install git+https://github.com/deveshkolte/RAGmortem.git
 ```
 
-Or for local development / testing:
+Or for local development:
 ```bash
 git clone https://github.com/deveshkolte/RAGmortem.git
 cd RAGmortem
 pip install -e .
 ```
 
-Verify in a clean terminal:
+### CLI Quickstart
+
+Check version:
 ```bash
-ragmortem --help
-python -c "import ragmortem; print(ragmortem.__version__)"
+ragmortem --version
+# or: python -m ragmortem --version
+```
+
+Run the bundled demonstration on 5 synthetic failure cases:
+```bash
+ragmortem demo
+```
+
+View input trace schema with a full example:
+```bash
+ragmortem schema
+```
+
+Diagnose your own execution traces:
+```bash
+# Trace-only diagnosis
+ragmortem diagnose trace.json
+
+# Corpus-aware diagnosis
+ragmortem diagnose traces.jsonl --corpus path/to/documents
+
+# Export report as JSON or Markdown
+ragmortem diagnose trace.json --format json --out report.json
+ragmortem diagnose trace.json --format md --out report.md
 ```
 
 ---
@@ -274,22 +299,31 @@ To ensure scientific credibility, RAGmortem distinguishes strictly between **con
 
 ---
 
-## 9. Current Limitations & Scope
+## 9. What Each Mode Can Truthfully Claim
 
-* **Experimental Status**: Heuristics are deterministic and reproducible, but remain experimental research. Do not treat as production-guaranteed certitude.
-* **Single-Hop Factual Focus**: Optimized for single-chunk answerable lookups. Multi-hop reasoning across disjoint documents remains active research.
-* **Uncalibrated Confidence**: `evidence_score` represents relative deterministic heuristic strength, not a calibrated Bayesian probability.
-* **Trace-Only Uncertainty**: Without corpus index access, trace-only mode cannot infer document presence in the corpus and intentionally outputs `UNKNOWN`.
-* **Reference-Answer Matching**: In reference-assisted mode, the generated answer is compared to `reference_answer` using deterministic token matching:
-  1. **Exact token subsequence match** (after lowercase, punctuation removal, whitespace collapse) — if the full gold token sequence appears contiguously in the candidate, it's correct.
-  2. **Fallback: ≥80% key-token overlap** — key tokens are those with length >2 or numeric. If ≥80% of gold key tokens appear in the candidate, it's correct. Numeric tokens (e.g., "15", "2024") are **required** to be present exactly.
-  
-  This is **not semantic equivalence** — paraphrased answers with different wording may not match. For best results, provide `reference_answer` as a verbatim substring of a corpus chunk. The fallback helps with minor phrasing differences but does not handle synonym substitution or reordering.
-* **Observed-Mode Heuristics**: Without `reference_answer`, `corpus_aware` and `trace_only` modes return *suspected* failure types based on score thresholds and corpus audit. They **cannot verify factual correctness** of the generated answer — they only flag when telemetry patterns match known failure signatures. A `GENERATION_SUSPECTED` result means "high-relevance context was present but answer may be wrong," not "answer is factually incorrect."
+| Diagnostic Mode | What It Can Truthfully Claim | What It Cannot Claim |
+| :--- | :--- | :--- |
+| **`trace_only`** | Operates strictly on provided runtime telemetry (query, retrieved chunks, scores, candidates, answer). Flags candidate truncation (`RANKING_SUSPECTED`), high-score context ignored (`GENERATION_SUSPECTED`), and appropriate refusal (`NO_FAILURE`). | Cannot verify whether unretrieved documents exist in your corpus or if the answer is factually correct. When retrieval scores are low or borderline, it safely refuses to guess and outputs `UNKNOWN`. |
+| **`corpus_aware`** | Audits your corpus index to determine if high-relevance documents exist for the query. Distinguishes retrieval misses (`RETRIEVAL_SUSPECTED`) from unanswerable queries (`ABSTENTION_SUSPECTED`), including terminology trap detection. | Cannot verify factual correctness of the generated answer without an expected reference answer. Diagnoses retrieval quality and grounding alignment, not semantic truth. |
+| **`reference_assisted`** | Verifies lexical correctness against a user-supplied reference answer. Determines if evidence was present in context (`GENERATION_PROVEN`), candidate pool (`RANKING_MISS`), broader corpus (`RETRIEVAL_MISS`), or absent (`SHOULD_ABSTAIN`). | Reference matching is purely lexical, not semantic. Paraphrased or synonymous answers may not match. `GENERATION_PROVEN` means lexical containment evidence, not mathematical proof of reasoning. |
+| **`oracle`** | Runs counterfactual replay isolating retriever vs. generator ceilings in controlled research benchmarks. | Cannot run on uncurated production traces without a known ground-truth gold chunk. |
 
 ---
 
-## 10. Testing
+## 10. Known Limitations
+
+* **Calibrated on a Single Embedding Setup**: Diagnostic score thresholds (`0.47`, `0.50`, `0.53`, `0.54`) and cutoff gap (`0.08`) were calibrated on **`sentence-transformers/all-MiniLM-L6-v2`** (384-dimensional dense cosine similarities). Different embedding models (e.g. OpenAI `text-embedding-3-small`, BGE-large, Cohere Embed v3) exhibit different similarity distributions, score dynamics, and score spreads.
+* **Lexical Reference Matching**: Reference answer verification in `is_answer_correct` uses deterministic token matching (contiguous token subsequence match or $\ge 80\%$ key-token overlap with exact numeric token matching). This is **not semantic equivalence** — answers with different phrasing or synonyms will not match.
+* **`GENERATION_PROVEN` Means Lexical Evidence, Not Proof**: The enum label `GENERATION_PROVEN` denotes that the reference answer text was verbatim contained within the retrieved context chunks, yet the generator failed to produce it. It does not represent formal mathematical or logical proof.
+* **Counterfactual Replay Requires Gold Chunk**: Counterfactual replay only runs in `oracle` mode, which strictly requires a verified `gold_chunk_id`.
+* **Synthetic Benchmark Labels**: All labels in the project's evaluation datasets (`evals/`) were generated synthetically using the project's own fault injector. No real-world production outages or third-party datasets have been evaluated yet. See [docs/EVIDENCE.md](docs/EVIDENCE.md) for full provenance and tuning history.
+* **Single-Hop Factual Focus**: Optimized for single-chunk answerable lookups. Multi-hop reasoning across disjoint documents remains active research.
+* **Uncalibrated Confidence**: `evidence_score` represents relative deterministic heuristic strength, not a calibrated Bayesian probability.
+
+
+---
+
+## 11. Testing
 
 Run the full offline test suite:
 
@@ -301,6 +335,7 @@ All 124 tests run 100% offline on CPU without network requests or API keys.
 
 ---
 
-## License
+## 12. License
 
 Apache-2.0 License. See [LICENSE](LICENSE) for details.
+

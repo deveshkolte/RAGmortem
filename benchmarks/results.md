@@ -1,7 +1,14 @@
 # RAGmortem Competitor Benchmark & Reality Check Report
 
+> [!WARNING]
+> **SIMULATION NOTICE — NOT REAL TOOLS:**  
+> **The results below are based on SIMULATIONS written by the author (`benchmarks/run_benchmark.py`), NOT executions of the real tools.**  
+> These simplified python models simulate theoretical architectural behaviors (e.g. top-k context inspection vs candidate pool inspection) because the external tools could either not be installed or represent continuous metric frameworks rather than root-cause classifiers.  
+> **These results MUST NOT be cited or published as comparisons against real tools.**
+
 **Date**: Day 3 Technical Sprint  
 **Target Dataset**: [`evals/injected_faults.jsonl`](../evals/injected_faults.jsonl) (122 validated synthetic RAG failures)
+
 
 ---
 
