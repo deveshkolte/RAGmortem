@@ -83,7 +83,7 @@ RAGmortem uses an uncertainty-aware decision tree operating on observable execut
 
 ---
 
-## 4. Installation
+## 4. Installation & Quickstart
 
 Requires **Python >= 3.11**.
 
@@ -92,17 +92,42 @@ Install from GitHub:
 pip install git+https://github.com/deveshkolte/RAGmortem.git
 ```
 
-Or for local development / testing:
+Or for local development:
 ```bash
 git clone https://github.com/deveshkolte/RAGmortem.git
 cd RAGmortem
 pip install -e .
 ```
 
-Verify in a clean terminal:
+### CLI Quickstart
+
+Check version:
 ```bash
-ragmortem --help
-python -c "import ragmortem; print(ragmortem.__version__)"
+ragmortem --version
+# or: python -m ragmortem --version
+```
+
+Run the bundled demonstration on 5 synthetic failure cases:
+```bash
+ragmortem demo
+```
+
+View input trace schema with a full example:
+```bash
+ragmortem schema
+```
+
+Diagnose your own execution traces:
+```bash
+# Trace-only diagnosis
+ragmortem diagnose trace.json
+
+# Corpus-aware diagnosis
+ragmortem diagnose traces.jsonl --corpus path/to/documents
+
+# Export report as JSON or Markdown
+ragmortem diagnose trace.json --format json --out report.json
+ragmortem diagnose trace.json --format md --out report.md
 ```
 
 ---

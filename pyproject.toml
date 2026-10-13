@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ragmortem"
-version = "0.1.1"
+version = "0.2.0.dev0"
 description = "A local failure debugger for RAG applications: isolates retrieval, ranking, generation, and abstention failures."
 readme = "README.md"
 requires-python = ">=3.11"
