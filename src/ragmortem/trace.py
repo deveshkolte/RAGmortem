@@ -98,7 +98,10 @@ class Trace:
         Never fabricates default scores if telemetry was absent.
         """
         if self.scores is not None:
-            return [float(s) for s in self.scores]
+            try:
+                return [float(s) for s in self.scores]
+            except (ValueError, TypeError):
+                return None
 
         # Check if chunks are dicts/Chunks with explicit score attributes
         if self.retrieved_chunks:
@@ -147,13 +150,20 @@ class Trace:
         if eff_top_k is None:
             eff_top_k = len(self.retrieved_chunks) if self.retrieved_chunks else 3
 
+        cand_scores = None
+        if self.candidate_scores:
+            try:
+                cand_scores = [float(s) for s in self.candidate_scores]
+            except (ValueError, TypeError):
+                cand_scores = None
+
         return ObservedExecution(
             question=self.query,
             retrieved_chunk_ids=self.retrieved_chunk_ids,
             generated_answer=self.answer,
             candidate_chunk_ids=self.candidate_chunk_ids,
             scores=self.get_scores(),
-            candidate_scores=[float(s) for s in self.candidate_scores] if self.candidate_scores else None,
+            candidate_scores=cand_scores,
             top_k=eff_top_k,
             case_id=self.case_id,
             metadata=clean_meta,
@@ -228,7 +238,10 @@ class Trace:
 
         scores = data.get("scores")
         if scores is not None:
-            scores = [float(s) for s in scores]
+            try:
+                scores = [float(s) for s in scores]
+            except (ValueError, TypeError):
+                scores = None
 
         ranks = data.get("ranks")
         if ranks is not None:
@@ -241,7 +254,10 @@ class Trace:
         )
         cand_scores = data.get("candidate_scores")
         if cand_scores is not None:
-            cand_scores = [float(s) for s in cand_scores]
+            try:
+                cand_scores = [float(s) for s in cand_scores]
+            except (ValueError, TypeError):
+                cand_scores = None
 
         meta = dict(data.get("metadata", {}))
 

@@ -597,7 +597,10 @@ def _render_case_card(case: dict[str, Any], idx: int) -> str:
     diag = str(case.get("diagnosis", "unknown")).lower()
     diag_english = _escape(case.get("diagnosis_english", diag))
     mode = _escape(case.get("mode", "trace-only"))
-    confidence = float(case.get("confidence", 0.0))
+    try:
+        confidence = float(case.get("confidence") if case.get("confidence") is not None else 0.0)
+    except (ValueError, TypeError):
+        confidence = 0.0
     conf_pct = int(confidence * 100)
     evidence = case.get("evidence", [])
     cannot_tell_you = _escape(case.get("what_this_cannot_tell_you", ""))

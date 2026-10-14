@@ -119,7 +119,10 @@ class ObservedExecution:
 
         # Scores
         if data.get("scores") is not None:
-            scores = [float(s) for s in data["scores"]]
+            try:
+                scores = [float(s) for s in data["scores"]]
+            except (ValueError, TypeError):
+                scores = None
         elif can_extract_scores and len(extracted_scores) == len(ret_ids) and ret_ids:
             scores = extracted_scores
         else:
@@ -127,7 +130,10 @@ class ObservedExecution:
 
         cand_scores = data.get("candidate_scores")
         if cand_scores is not None:
-            cand_scores = [float(s) for s in cand_scores]
+            try:
+                cand_scores = [float(s) for s in cand_scores]
+            except (ValueError, TypeError):
+                cand_scores = None
 
         if chunk_texts:
             clean_metadata["chunk_texts"] = chunk_texts

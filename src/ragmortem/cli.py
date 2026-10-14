@@ -63,6 +63,8 @@ def load_input_cases(path: Path) -> list[dict[str, Any]]:
     """Load trace cases from JSON file (single dict or array) or JSONL file."""
     if not path.exists():
         raise FileNotFoundError(f"Input file not found: '{path}'")
+    if path.is_dir():
+        raise ValueError(f"Input path '{path}' is a directory, expected a JSON or JSONL file.")
 
     text = path.read_text(encoding="utf-8").strip()
     if not text:
@@ -123,15 +125,26 @@ def _normalize_chunks(raw_chunks: Any) -> list[dict[str, Any]]:
         if isinstance(c, dict):
             cid = str(c.get("chunk_id") or c.get("id") or "")
             ctext = str(c.get("text") or c.get("content") or "")
-            cscore = float(c["score"]) if c.get("score") is not None else None
+            cscore = None
+            if c.get("score") is not None:
+                try:
+                    cscore = float(c["score"])
+                except (ValueError, TypeError):
+                    cscore = None
             normalized.append({"id": cid, "text": ctext, "score": cscore})
         elif isinstance(c, str):
             normalized.append({"id": c, "text": c, "score": None})
         elif hasattr(c, "id"):
+            cscore = None
+            if hasattr(c, "score") and getattr(c, "score") is not None:
+                try:
+                    cscore = float(getattr(c, "score"))
+                except (ValueError, TypeError):
+                    cscore = None
             normalized.append({
                 "id": str(c.id),
                 "text": str(getattr(c, "text", "")),
-                "score": float(getattr(c, "score", 0.0)) if hasattr(c, "score") else None,
+                "score": cscore,
             })
     return normalized
 
@@ -179,8 +192,11 @@ def execute_diagnose_cases(
         explicit_scores = item.get("scores")
         if explicit_scores is not None and ret_chunks:
             for c_dict, s in zip(ret_chunks, explicit_scores):
-                if c_dict.get("score") is None:
-                    c_dict["score"] = float(s)
+                if c_dict.get("score") is None and s is not None:
+                    try:
+                        c_dict["score"] = float(s)
+                    except (ValueError, TypeError):
+                        pass
 
         try:
             diag_res = diagnose(

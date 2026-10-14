@@ -1131,7 +1131,18 @@ class DashboardHTTPHandler(BaseHTTPRequestHandler):
             self.end_headers()
             return
 
-        content_length = int(self.headers.get("Content-Length", 0))
+        try:
+            content_length = int(self.headers.get("Content-Length", 0))
+        except (ValueError, TypeError):
+            content_length = 0
+
+        if content_length <= 0:
+            self.send_response(400)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            self.wfile.write(json.dumps({"error": "Empty or missing request body"}).encode("utf-8"))
+            return
+
         body = self.rfile.read(content_length).decode("utf-8")
 
         try:

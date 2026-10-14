@@ -251,3 +251,52 @@ def test_cli_demo_format_html(tmp_path: Path) -> None:
     assert "<!DOCTYPE html>" in content
     assert "Synthetic Demonstration Data" in content
     assert "Total Traces Audited" in content
+
+
+def test_cli_bad_input_directory(tmp_path: Path) -> None:
+    """Passing a directory path to diagnose produces readable error and exit code 2."""
+    dir_path = tmp_path / "a_directory"
+    dir_path.mkdir()
+
+    buf_err = io.StringIO()
+    with redirect_stderr(buf_err):
+        exit_code = main(["diagnose", str(dir_path)])
+    assert exit_code == 2
+    assert "is a directory" in buf_err.getvalue()
+
+
+def test_cli_diagnose_non_numeric_score(tmp_path: Path) -> None:
+    """Traces with non-numeric or empty string scores process safely without crashing."""
+    case = {
+        "id": "nan_score_case",
+        "question": "What is the policy?",
+        "answer": "Policy answer.",
+        "retrieved": [{"chunk_id": "c1", "text": "Policy chunk content.", "score": "N/A"}],
+    }
+    input_file = tmp_path / "nan_case.json"
+    input_file.write_text(json.dumps(case), encoding="utf-8")
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        exit_code = main(["diagnose", str(input_file)])
+    assert exit_code == 0
+    assert "nan_score_case" in buf.getvalue()
+
+
+def test_cli_diagnose_explicit_scores_malformed(tmp_path: Path) -> None:
+    """Traces with malformed explicit score array process safely without crashing."""
+    case = {
+        "id": "malformed_explicit_case",
+        "question": "What is the policy?",
+        "answer": "Policy answer.",
+        "retrieved": [{"chunk_id": "c1", "text": "Policy chunk content."}],
+        "scores": ["invalid_score_str"],
+    }
+    input_file = tmp_path / "malformed_scores.json"
+    input_file.write_text(json.dumps(case), encoding="utf-8")
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        exit_code = main(["diagnose", str(input_file)])
+    assert exit_code == 0
+    assert "malformed_explicit_case" in buf.getvalue()
