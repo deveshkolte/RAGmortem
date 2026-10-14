@@ -1,7 +1,7 @@
 """Zero-dependency local HTTP server and live showcase UI for RAGmortem.
 
-Provides a world-class, state-of-the-art forensic diagnostic observatory
-for RAG failure root-cause attribution.
+Engineered with an enterprise-grade dark telemetry interface (inspired by
+Datadog, Linear, and GitHub Enterprise) for deterministic RAG failure triage.
 """
 
 from __future__ import annotations
@@ -25,1013 +25,851 @@ INDEX_HTML = r"""<!DOCTYPE html>
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>RAGmortem • Automated RAG Failure Forensic Observatory</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <title>RAGmortem • Telemetry & Failure Diagnostics</title>
   <style>
     :root {
-      --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      --font-mono: 'JetBrains Mono', ui-monospace, Menlo, Monaco, Consolas, monospace;
-      
-      --bg-base: #07090E;
-      --bg-surface: #0E131F;
-      --bg-surface-elevated: #141B2D;
-      --bg-surface-glass: rgba(14, 19, 31, 0.75);
-      
-      --border-subtle: rgba(255, 255, 255, 0.07);
-      --border-light: rgba(255, 255, 255, 0.12);
-      --border-focus: #6366F1;
-      
-      --text-primary: #F8FAFC;
-      --text-secondary: #94A3B8;
-      --text-muted: #64748B;
-      
-      /* Status Tints */
-      --danger-main: #F43F5E;
-      --danger-glow: rgba(244, 63, 94, 0.25);
-      --danger-bg: rgba(244, 63, 94, 0.10);
-      --danger-border: rgba(244, 63, 94, 0.35);
-      
-      --warning-main: #F59E0B;
-      --warning-glow: rgba(245, 158, 11, 0.25);
-      --warning-bg: rgba(245, 158, 11, 0.10);
-      --warning-border: rgba(245, 158, 11, 0.35);
-      
-      --success-main: #10B981;
-      --success-glow: rgba(16, 185, 129, 0.25);
-      --success-bg: rgba(16, 185, 129, 0.10);
-      --success-border: rgba(16, 185, 129, 0.35);
-      
-      --info-main: #38BDF8;
-      --info-glow: rgba(56, 189, 248, 0.25);
-      --info-bg: rgba(56, 189, 248, 0.10);
-      
-      --purple-main: #A855F7;
-      --purple-glow: rgba(168, 85, 247, 0.25);
-      --purple-bg: rgba(168, 85, 247, 0.10);
-      
-      --radius-sm: 6px;
-      --radius-md: 10px;
-      --radius-lg: 16px;
-      --radius-xl: 20px;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", "Segoe UI Mono", Menlo, Monaco, Consolas, monospace;
+
+      /* Enterprise Palette: Deep Charcoal & Surgical Neutrals */
+      --bg-canvas: #090B0E;
+      --bg-panel: #11141A;
+      --bg-subtle: #161B22;
+      --bg-hover: #1C212B;
+      --bg-active: #222936;
+
+      --border-default: #262D38;
+      --border-muted: #1D232C;
+      --border-emphasis: #384252;
+
+      --text-bright: #F0F3F6;
+      --text-primary: #C9D1D9;
+      --text-secondary: #8B949E;
+      --text-muted: #656D76;
+
+      /* Muted Functional Status Hues (No Neon) */
+      --status-fail-text: #F85149;
+      --status-fail-bg: rgba(248, 81, 73, 0.08);
+      --status-fail-border: rgba(248, 81, 73, 0.28);
+
+      --status-warn-text: #D29922;
+      --status-warn-bg: rgba(210, 153, 34, 0.08);
+      --status-warn-border: rgba(210, 153, 34, 0.28);
+
+      --status-pass-text: #3FB950;
+      --status-pass-bg: rgba(63, 185, 80, 0.08);
+      --status-pass-border: rgba(63, 185, 80, 0.28);
+
+      --status-info-text: #58A6FF;
+      --status-info-bg: rgba(88, 166, 255, 0.08);
+      --status-info-border: rgba(88, 166, 255, 0.28);
+
+      --status-neutral-text: #8B949E;
+      --status-neutral-bg: rgba(139, 148, 158, 0.08);
+      --status-neutral-border: rgba(139, 148, 158, 0.28);
+
+      --radius-sm: 4px;
+      --radius-md: 6px;
+      --radius-lg: 8px;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
-    
+
     body {
       font-family: var(--font-sans);
-      background-color: var(--bg-base);
-      background-image: 
-        radial-gradient(circle at 15% 0%, rgba(99, 102, 241, 0.14) 0%, transparent 45%),
-        radial-gradient(circle at 85% 5%, rgba(244, 63, 94, 0.08) 0%, transparent 40%),
-        radial-gradient(circle at 50% 50%, rgba(14, 165, 233, 0.04) 0%, transparent 60%);
-      background-attachment: fixed;
+      background-color: var(--bg-canvas);
       color: var(--text-primary);
+      font-size: 13px;
       line-height: 1.5;
       min-height: 100vh;
-      padding: 24px 32px 48px;
       -webkit-font-smoothing: antialiased;
     }
 
-    .container {
-      max-width: 1440px;
-      margin: 0 auto;
-    }
-
-    /* Top Navigation Header */
-    .top-nav {
-      background: var(--bg-surface-glass);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border: 1px solid var(--border-light);
-      border-radius: var(--radius-lg);
-      padding: 16px 24px;
+    /* Top Application Bar */
+    .app-header {
+      background: var(--bg-panel);
+      border-bottom: 1px solid var(--border-default);
+      padding: 12px 24px;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 24px;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
+      position: sticky;
+      top: 0;
+      z-index: 100;
     }
-    
-    .brand-group {
+    .header-left {
       display: flex;
       align-items: center;
-      gap: 14px;
+      gap: 16px;
     }
-    .brand-logo-mark {
-      width: 36px;
-      height: 36px;
-      border-radius: 10px;
-      background: linear-gradient(135deg, #6366F1 0%, #EC4899 100%);
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      font-weight: 800;
-      font-size: 18px;
-      color: #fff;
-      box-shadow: 0 0 16px rgba(99, 102, 241, 0.4);
-    }
-    .brand-text h1 {
-      font-size: 17px;
-      font-weight: 800;
-      letter-spacing: -0.02em;
-      color: #fff;
+    .app-logo {
+      font-weight: 700;
+      font-size: 14px;
+      color: var(--text-bright);
+      letter-spacing: -0.01em;
       display: flex;
       align-items: center;
       gap: 8px;
     }
-    .brand-sub {
-      font-size: 12px;
-      color: var(--text-muted);
-      font-weight: 500;
-    }
-    .version-tag {
+    .logo-badge {
+      background: var(--border-emphasis);
+      color: var(--text-bright);
+      font-size: 10px;
       font-family: var(--font-mono);
-      font-size: 11px;
-      background: rgba(255, 255, 255, 0.08);
-      border: 1px solid var(--border-subtle);
-      color: var(--text-secondary);
-      padding: 2px 7px;
-      border-radius: 4px;
-      font-weight: 600;
+      font-weight: 700;
+      padding: 1px 6px;
+      border-radius: var(--radius-sm);
     }
-    
-    .nav-actions {
+    .header-divider {
+      width: 1px;
+      height: 16px;
+      background: var(--border-default);
+    }
+    .header-breadcrumb {
+      font-size: 12px;
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+    }
+
+    .header-right {
       display: flex;
       align-items: center;
-      gap: 12px;
+      gap: 10px;
     }
     .btn {
       font-family: var(--font-sans);
-      font-size: 13px;
+      font-size: 12px;
       font-weight: 600;
-      padding: 8px 16px;
+      padding: 6px 12px;
       border-radius: var(--radius-md);
-      border: 1px solid transparent;
+      border: 1px solid var(--border-default);
+      background: var(--bg-subtle);
+      color: var(--text-bright);
       cursor: pointer;
       display: inline-flex;
       align-items: center;
-      gap: 8px;
-      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
-      text-decoration: none;
+      gap: 6px;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+    .btn:hover {
+      background: var(--bg-hover);
+      border-color: var(--border-emphasis);
     }
     .btn-primary {
-      background: linear-gradient(135deg, #4F46E5 0%, #6366F1 100%);
-      color: #fff;
-      box-shadow: 0 2px 12px rgba(99, 102, 241, 0.3);
+      background: #238636;
+      border-color: rgba(240, 246, 252, 0.1);
+      color: #FFFFFF;
     }
     .btn-primary:hover {
-      box-shadow: 0 4px 20px rgba(99, 102, 241, 0.5);
-      transform: translateY(-1px);
-    }
-    .btn-secondary {
-      background: var(--bg-surface-elevated);
-      color: var(--text-secondary);
-      border-color: var(--border-light);
-    }
-    .btn-secondary:hover {
-      background: #1E283F;
-      color: var(--text-primary);
-      border-color: rgba(255, 255, 255, 0.2);
+      background: #2EA043;
+      border-color: rgba(240, 246, 252, 0.2);
     }
 
-    /* Main Dashboard Layout */
-    .dashboard-grid {
+    /* Layout Frame */
+    .app-layout {
       display: grid;
-      grid-template-columns: 360px 1fr;
-      gap: 24px;
-      align-items: start;
+      grid-template-columns: 320px 1fr;
+      min-height: calc(100vh - 49px);
     }
-    @media (max-width: 1100px) {
-      .dashboard-grid { grid-template-columns: 1fr; }
+    @media (max-width: 1080px) {
+      .app-layout { grid-template-columns: 1fr; }
     }
 
-    /* Sidebar / Control Panel */
-    .panel {
-      background: var(--bg-surface);
-      border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-lg);
-      padding: 20px;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
-    }
-    .panel-header {
+    /* Left Sidebar */
+    .sidebar {
+      background: var(--bg-panel);
+      border-right: 1px solid var(--border-default);
       display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 14px;
-      padding-bottom: 10px;
-      border-bottom: 1px solid var(--border-subtle);
+      flex-direction: column;
     }
-    .panel-title {
+    .sidebar-section {
+      padding: 16px;
+      border-bottom: 1px solid var(--border-muted);
+    }
+    .sidebar-title {
       font-size: 11px;
       font-weight: 700;
       color: var(--text-muted);
       text-transform: uppercase;
-      letter-spacing: 0.08em;
+      letter-spacing: 0.05em;
+      margin-bottom: 10px;
+      display: flex;
+      justify-content: space-between;
     }
 
-    /* Scenario Selector Cards */
-    .scenarios-list {
+    /* Case Navigator List */
+    .case-nav-list {
       display: flex;
       flex-direction: column;
-      gap: 8px;
-      margin-bottom: 24px;
+      gap: 4px;
     }
-    .scenario-card {
-      background: rgba(20, 27, 45, 0.6);
-      border: 1px solid var(--border-subtle);
+    .case-nav-item {
+      padding: 8px 10px;
       border-radius: var(--radius-md);
-      padding: 12px 14px;
+      border: 1px solid transparent;
+      background: transparent;
       cursor: pointer;
-      transition: all 0.2s ease;
-      position: relative;
+      text-align: left;
+      transition: background 0.1s ease, border-color 0.1s ease;
     }
-    .scenario-card:hover {
-      background: var(--bg-surface-elevated);
-      border-color: var(--border-light);
-      transform: translateX(2px);
+    .case-nav-item:hover {
+      background: var(--bg-hover);
     }
-    .scenario-card.active {
-      background: rgba(99, 102, 241, 0.12);
-      border-color: #6366F1;
-      box-shadow: 0 0 16px rgba(99, 102, 241, 0.2);
+    .case-nav-item.active {
+      background: var(--bg-active);
+      border-color: var(--border-emphasis);
     }
-    .scenario-top {
+    .case-nav-top {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 4px;
+      margin-bottom: 2px;
     }
-    .scenario-name {
-      font-size: 13px;
-      font-weight: 700;
-      color: var(--text-primary);
+    .case-nav-name {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-bright);
     }
-    .scenario-tag {
-      font-size: 10px;
-      font-weight: 700;
+    .badge {
       font-family: var(--font-mono);
-      padding: 2px 6px;
-      border-radius: 4px;
+      font-size: 10px;
+      font-weight: 600;
+      padding: 1px 6px;
+      border-radius: var(--radius-sm);
       text-transform: uppercase;
+      letter-spacing: 0.03em;
     }
-    .tag-gen { background: var(--danger-bg); color: var(--danger-main); border: 1px solid var(--danger-border); }
-    .tag-rank { background: var(--warning-bg); color: var(--warning-main); border: 1px solid var(--warning-border); }
-    .tag-ok { background: var(--success-bg); color: var(--success-main); border: 1px solid var(--success-border); }
-    .tag-unk { background: rgba(148, 163, 184, 0.12); color: #94A3B8; border: 1px solid rgba(148, 163, 184, 0.2); }
-    .scenario-query {
+    .badge-fail {
+      background: var(--status-fail-bg);
+      color: var(--status-fail-text);
+      border: 1px solid var(--status-fail-border);
+    }
+    .badge-warn {
+      background: var(--status-warn-bg);
+      color: var(--status-warn-text);
+      border: 1px solid var(--status-warn-border);
+    }
+    .badge-pass {
+      background: var(--status-pass-bg);
+      color: var(--status-pass-text);
+      border: 1px solid var(--status-pass-border);
+    }
+    .badge-neutral {
+      background: var(--status-neutral-bg);
+      color: var(--status-neutral-text);
+      border: 1px solid var(--status-neutral-border);
+    }
+    .case-nav-query {
       font-size: 11px;
-      color: var(--text-secondary);
+      color: var(--text-muted);
       white-space: nowrap;
       overflow: hidden;
       text-overflow: ellipsis;
     }
 
     /* Form Fields */
-    .form-group {
+    .field-group {
       margin-bottom: 12px;
     }
-    label {
+    .field-label {
       display: block;
       font-size: 11px;
-      font-weight: 700;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      margin-bottom: 5px;
+      font-weight: 600;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
     }
-    input[type="text"], textarea, select {
+    .input-text, .input-textarea, .input-select {
       width: 100%;
-      background: #090E17;
-      border: 1px solid var(--border-subtle);
+      background: var(--bg-canvas);
+      border: 1px solid var(--border-default);
       border-radius: var(--radius-sm);
-      padding: 8px 12px;
+      padding: 6px 8px;
       font-size: 12px;
-      color: var(--text-primary);
+      color: var(--text-bright);
       font-family: var(--font-sans);
-      transition: border-color 0.15s ease;
     }
-    textarea {
+    .input-textarea {
       font-family: var(--font-mono);
       font-size: 11px;
-      line-height: 1.5;
       resize: vertical;
+      line-height: 1.4;
     }
-    input[type="text"]:focus, textarea:focus, select:focus {
+    .input-text:focus, .input-textarea:focus, .input-select:focus {
       outline: none;
-      border-color: var(--border-focus);
-      box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2);
+      border-color: #58A6FF;
     }
 
-    /* RIGHT DISPLAY: FORENSIC WORKBENCH */
-    .workbench {
+    /* Main Diagnostic Workspace */
+    .workspace {
+      padding: 24px;
+      background: var(--bg-canvas);
       display: flex;
       flex-direction: column;
-      gap: 24px;
-    }
-
-    /* Executive Verdict Banner */
-    .verdict-hero {
-      background: var(--bg-surface);
-      border: 1px solid var(--border-light);
-      border-radius: var(--radius-lg);
-      padding: 24px 28px;
-      position: relative;
-      overflow: hidden;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
-    }
-    .verdict-hero::before {
-      content: '';
-      position: absolute;
-      top: 0; left: 0; right: 0;
-      height: 3px;
-      background: linear-gradient(90deg, #F43F5E, #F59E0B, #10B981, #6366F1);
-    }
-    .verdict-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      margin-bottom: 16px;
-      flex-wrap: wrap;
-      gap: 16px;
-    }
-    .verdict-label {
-      font-size: 11px;
-      font-weight: 800;
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      color: var(--text-muted);
-      margin-bottom: 6px;
-    }
-    .verdict-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 16px;
-      font-weight: 800;
-      padding: 8px 18px;
-      border-radius: 9999px;
-      letter-spacing: -0.01em;
-      box-shadow: 0 0 24px rgba(0, 0, 0, 0.3);
-    }
-    .badge-gen {
-      background: var(--danger-bg);
-      color: #FDA4AF;
-      border: 1px solid var(--danger-border);
-      box-shadow: 0 0 20px var(--danger-glow);
-    }
-    .badge-rank {
-      background: var(--warning-bg);
-      color: #FDE68A;
-      border: 1px solid var(--warning-border);
-      box-shadow: 0 0 20px var(--warning-glow);
-    }
-    .badge-ret {
-      background: var(--purple-bg);
-      color: #E9D5FF;
-      border: 1px solid rgba(168, 85, 247, 0.35);
-      box-shadow: 0 0 20px var(--purple-glow);
-    }
-    .badge-ok {
-      background: var(--success-bg);
-      color: #A7F3D0;
-      border: 1px solid var(--success-border);
-      box-shadow: 0 0 20px var(--success-glow);
-    }
-    .badge-unk {
-      background: rgba(148, 163, 184, 0.15);
-      color: #E2E8F0;
-      border: 1px solid rgba(148, 163, 184, 0.3);
-    }
-
-    .meta-metrics {
-      display: flex;
-      align-items: center;
       gap: 20px;
     }
-    .metric-pill {
-      text-align: right;
+
+    /* Verdict Card */
+    .verdict-panel {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-default);
+      border-radius: var(--radius-lg);
+      padding: 18px 20px;
     }
-    .metric-val {
-      font-size: 20px;
-      font-weight: 800;
-      color: var(--text-primary);
-      font-family: var(--font-mono);
+    .verdict-top-bar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+      flex-wrap: wrap;
+      gap: 12px;
     }
-    .metric-name {
-      font-size: 10px;
+    .verdict-title-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .verdict-main-badge {
+      font-size: 13px;
       font-weight: 700;
+      padding: 4px 10px;
+      border-radius: var(--radius-sm);
+      letter-spacing: -0.01em;
+    }
+    .verdict-meta-items {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+    .meta-item {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+    }
+    .meta-val {
+      font-family: var(--font-mono);
+      font-weight: 700;
+      font-size: 14px;
+      color: var(--text-bright);
+    }
+    .meta-lbl {
+      font-size: 10px;
       color: var(--text-muted);
       text-transform: uppercase;
       letter-spacing: 0.05em;
     }
-
-    /* PRIMARY SECTION: FORENSIC PIPELINE INSPECTOR */
-    .pipeline-container {
-      background: var(--bg-surface);
-      border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-lg);
-      padding: 24px;
-      box-shadow: 0 4px 24px rgba(0, 0, 0, 0.25);
+    .verdict-summary-text {
+      font-size: 13px;
+      color: var(--text-primary);
+      padding-top: 10px;
+      border-top: 1px solid var(--border-muted);
+      line-height: 1.5;
     }
-    .section-eyebrow {
+
+    /* Telemetry Trace Waterfall / DAG */
+    .trace-section {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-default);
+      border-radius: var(--radius-lg);
+      overflow: hidden;
+    }
+    .section-header {
+      padding: 12px 18px;
+      background: var(--bg-subtle);
+      border-bottom: 1px solid var(--border-default);
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 20px;
     }
-    .section-heading {
-      font-size: 13px;
-      font-weight: 800;
+    .section-title-text {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-bright);
       text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: #E2E8F0;
-      display: flex;
-      align-items: center;
-      gap: 8px;
+      letter-spacing: 0.04em;
     }
 
-    /* 4-Stage Horizontal Flow */
-    .flow-grid {
+    .pipeline-lanes {
       display: grid;
       grid-template-columns: repeat(4, 1fr);
-      gap: 16px;
-      position: relative;
+      border-bottom: 1px solid var(--border-default);
     }
-    @media (max-width: 1024px) {
-      .flow-grid { grid-template-columns: 1fr; }
+    @media (max-width: 1100px) {
+      .pipeline-lanes { grid-template-columns: 1fr; }
     }
 
-    .flow-node {
-      background: var(--bg-surface-elevated);
-      border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-md);
+    .lane-box {
       padding: 16px;
+      border-right: 1px solid var(--border-muted);
+      background: var(--bg-panel);
       display: flex;
       flex-direction: column;
       position: relative;
-      transition: all 0.2s ease;
     }
-    .flow-node.breakpoint-alert {
-      border-color: var(--danger-main);
-      background: rgba(244, 63, 94, 0.05);
-      box-shadow: 0 0 24px rgba(244, 63, 94, 0.2);
+    .lane-box:last-child {
+      border-right: none;
     }
-    .flow-node.breakpoint-warning {
-      border-color: var(--warning-main);
-      background: rgba(245, 158, 11, 0.05);
-      box-shadow: 0 0 24px rgba(245, 158, 11, 0.2);
+    .lane-box.lane-defect {
+      background: rgba(248, 81, 73, 0.04);
+      border-top: 2px solid var(--status-fail-text);
     }
-    .flow-node.passed {
-      border-color: rgba(16, 185, 129, 0.4);
+    .lane-box.lane-warning {
+      background: rgba(210, 153, 34, 0.04);
+      border-top: 2px solid var(--status-warn-text);
     }
-
-    /* Pulsing Breakpoint Indicator */
-    .breakpoint-pill {
-      position: absolute;
-      top: -12px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: var(--danger-main);
-      color: #fff;
-      font-size: 9px;
-      font-weight: 800;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      padding: 3px 8px;
-      border-radius: 9999px;
-      display: flex;
-      align-items: center;
-      gap: 4px;
-      box-shadow: 0 0 12px var(--danger-main);
-      animation: pulseAlert 2s infinite ease-in-out;
-      z-index: 2;
-    }
-    .breakpoint-pill.warning-pill {
-      background: var(--warning-main);
-      box-shadow: 0 0 12px var(--warning-main);
-    }
-    @keyframes pulseAlert {
-      0%, 100% { opacity: 1; transform: translateX(-50%) scale(1); }
-      50% { opacity: 0.8; transform: translateX(-50%) scale(1.05); }
+    .lane-box.lane-healthy {
+      border-top: 2px solid var(--status-pass-text);
     }
 
-    .node-header {
+    .lane-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 12px;
-      padding-bottom: 8px;
-      border-bottom: 1px solid var(--border-subtle);
+      margin-bottom: 10px;
     }
-    .node-number {
+    .lane-step {
       font-family: var(--font-mono);
-      font-size: 11px;
-      font-weight: 700;
-      color: var(--text-muted);
-    }
-    .node-status {
       font-size: 10px;
-      font-weight: 800;
-      font-family: var(--font-mono);
-      padding: 2px 6px;
-      border-radius: 4px;
-      letter-spacing: 0.04em;
-    }
-    .status-pass { background: var(--success-bg); color: var(--success-main); }
-    .status-fail { background: var(--danger-bg); color: var(--danger-main); }
-    .status-warn { background: var(--warning-bg); color: var(--warning-main); }
-    .status-neutral { background: rgba(148, 163, 184, 0.1); color: var(--text-muted); }
-
-    .node-title {
-      font-size: 13px;
+      color: var(--text-muted);
       font-weight: 700;
-      color: var(--text-primary);
+    }
+    .lane-title {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-bright);
       margin-bottom: 8px;
     }
-    .node-body {
+    .lane-body {
       font-size: 12px;
       color: var(--text-secondary);
       flex-grow: 1;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 6px;
     }
 
-    /* Score Distribution Visualizer (Stage 2) */
-    .score-meter {
-      background: rgba(0, 0, 0, 0.4);
-      border: 1px solid var(--border-subtle);
+    /* Metric Visualization Controls */
+    .metric-row {
+      background: var(--bg-canvas);
+      border: 1px solid var(--border-muted);
       border-radius: var(--radius-sm);
       padding: 8px 10px;
       margin-top: 4px;
     }
-    .score-meta {
+    .metric-row-header {
       display: flex;
       justify-content: space-between;
       font-size: 11px;
       font-weight: 600;
       margin-bottom: 4px;
     }
-    .score-bar-track {
-      height: 6px;
-      background: rgba(255, 255, 255, 0.08);
-      border-radius: 3px;
+    .metric-progress {
+      height: 4px;
+      background: var(--bg-subtle);
+      border-radius: 2px;
       overflow: hidden;
-      position: relative;
     }
-    .score-bar-fill {
+    .metric-progress-bar {
       height: 100%;
-      background: linear-gradient(90deg, #38BDF8, #6366F1);
-      border-radius: 3px;
+      background: #58A6FF;
     }
-    .threshold-ticks {
+    .metric-ticks {
       display: flex;
       justify-content: space-between;
-      font-size: 9px;
       font-family: var(--font-mono);
+      font-size: 9px;
       color: var(--text-muted);
       margin-top: 4px;
     }
 
-    /* Top-K Cutoff Visualization (Stage 3) */
-    .cutoff-diagram {
-      background: rgba(0, 0, 0, 0.4);
-      border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-sm);
-      padding: 8px;
+    /* Top-K Cutoff Representation */
+    .cutoff-list {
       display: flex;
       flex-direction: column;
       gap: 4px;
+      background: var(--bg-canvas);
+      border: 1px solid var(--border-muted);
+      border-radius: var(--radius-sm);
+      padding: 6px;
+      margin-top: 4px;
     }
-    .cutoff-item {
-      font-size: 10px;
+    .cutoff-chunk {
       font-family: var(--font-mono);
-      padding: 4px 6px;
-      border-radius: 4px;
+      font-size: 10px;
+      padding: 3px 6px;
+      border-radius: var(--radius-sm);
       display: flex;
       justify-content: space-between;
     }
-    .in-prompt {
-      background: rgba(16, 185, 129, 0.12);
-      border: 1px solid rgba(16, 185, 129, 0.25);
-      color: #A7F3D0;
+    .chunk-admitted {
+      background: rgba(63, 185, 80, 0.1);
+      color: #3FB950;
+      border: 1px solid rgba(63, 185, 80, 0.2);
     }
-    .cutoff-divider {
-      border-top: 1px dashed var(--warning-main);
+    .cutoff-line {
+      border-top: 1px dashed #D29922;
       margin: 4px 0;
       text-align: center;
       position: relative;
     }
-    .cutoff-label {
+    .cutoff-line-label {
       font-size: 8px;
-      font-weight: 800;
-      color: var(--warning-main);
-      background: #0E131F;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      color: #D29922;
+      background: var(--bg-canvas);
       padding: 0 4px;
       position: relative;
       top: -6px;
     }
-    .dropped-candidate {
-      background: rgba(244, 63, 94, 0.1);
-      border: 1px solid rgba(244, 63, 94, 0.2);
-      color: #FDA4AF;
-      opacity: 0.8;
+    .chunk-pruned {
+      background: rgba(248, 81, 73, 0.08);
+      color: #F85149;
+      border: 1px solid rgba(248, 81, 73, 0.18);
     }
 
-    /* Fact Comparison View (Stage 4) */
-    .fact-diff-box {
-      background: rgba(0, 0, 0, 0.35);
-      border: 1px solid var(--border-subtle);
+    /* Stage 4 Diff Box */
+    .diff-container {
+      background: var(--bg-canvas);
+      border: 1px solid var(--border-muted);
       border-radius: var(--radius-sm);
       padding: 8px 10px;
       display: flex;
       flex-direction: column;
       gap: 6px;
-      font-size: 11px;
     }
-    .fact-row {
-      display: flex;
-      flex-direction: column;
-      gap: 2px;
-    }
-    .fact-lbl {
+    .diff-item-label {
       font-size: 9px;
-      font-weight: 800;
-      text-transform: uppercase;
-      letter-spacing: 0.05em;
+      font-weight: 700;
       color: var(--text-muted);
+      text-transform: uppercase;
     }
-    .fact-txt-exp { color: #A7F3D0; font-weight: 600; }
-    .fact-txt-gen { color: #FDA4AF; font-weight: 600; }
+    .diff-expected { color: #3FB950; font-family: var(--font-mono); font-size: 11px; }
+    .diff-actual { color: #F85149; font-family: var(--font-mono); font-size: 11px; }
 
-    /* SECONDARY SECTION: FORENSIC INVESTIGATION & ACTIONABLE TICKET */
-    .investigation-grid {
+    /* Bottom Grid: Evidence & Remediation Runbook */
+    .bottom-grid {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 24px;
+      gap: 20px;
     }
     @media (max-width: 900px) {
-      .investigation-grid { grid-template-columns: 1fr; }
+      .bottom-grid { grid-template-columns: 1fr; }
     }
 
-    .audit-card {
-      background: var(--bg-surface);
-      border: 1px solid var(--border-subtle);
+    .audit-pane {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-default);
       border-radius: var(--radius-lg);
-      padding: 24px;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
+      padding: 18px 20px;
     }
-    .audit-card-title {
-      font-size: 12px;
-      font-weight: 800;
+    .pane-header {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-muted);
       text-transform: uppercase;
-      letter-spacing: 0.06em;
-      color: var(--text-primary);
-      margin-bottom: 16px;
+      letter-spacing: 0.05em;
+      margin-bottom: 12px;
       display: flex;
       align-items: center;
       gap: 8px;
     }
 
-    /* Evidence Timeline */
-    .evidence-stream {
+    .evidence-list {
+      list-style: none;
       display: flex;
       flex-direction: column;
-      gap: 12px;
+      gap: 8px;
     }
-    .evidence-event {
-      display: flex;
-      gap: 12px;
-      align-items: flex-start;
-      background: rgba(20, 27, 45, 0.4);
-      border: 1px solid var(--border-subtle);
+    .evidence-entry {
+      background: var(--bg-subtle);
+      border: 1px solid var(--border-muted);
       border-radius: var(--radius-sm);
-      padding: 10px 12px;
-    }
-    .event-icon {
-      font-size: 14px;
-      line-height: 1;
-      margin-top: 2px;
-    }
-    .event-desc {
+      padding: 8px 12px;
       font-size: 12px;
       color: var(--text-primary);
+      display: flex;
+      gap: 10px;
       line-height: 1.5;
     }
+    .evidence-tag {
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
+      padding-top: 1px;
+    }
 
-    /* Actionable Engineering Remediation Ticket */
-    .ticket-container {
-      background: linear-gradient(180deg, rgba(30, 41, 67, 0.5) 0%, rgba(15, 23, 42, 0.8) 100%);
-      border: 1px solid rgba(99, 102, 241, 0.35);
-      border-radius: var(--radius-md);
-      padding: 18px;
-      box-shadow: 0 0 24px rgba(99, 102, 241, 0.1);
+    /* Remediation Card */
+    .runbook-card {
+      background: var(--bg-subtle);
+      border: 1px solid var(--border-muted);
+      border-left: 3px solid #58A6FF;
+      border-radius: var(--radius-sm);
+      padding: 12px 14px;
       display: flex;
       flex-direction: column;
-      justify-content: space-between;
-      height: 100%;
+      gap: 8px;
     }
-    .ticket-badge-row {
+    .runbook-meta {
       display: flex;
       justify-content: space-between;
-      align-items: center;
-      margin-bottom: 12px;
-    }
-    .ticket-chip {
-      font-size: 10px;
-      font-weight: 800;
+      font-size: 11px;
       font-family: var(--font-mono);
-      background: rgba(99, 102, 241, 0.2);
-      border: 1px solid rgba(99, 102, 241, 0.4);
-      color: #A5B4FC;
-      padding: 3px 8px;
-      border-radius: 4px;
-      text-transform: uppercase;
     }
-    .ticket-body {
+    .runbook-team {
+      color: #58A6FF;
+      font-weight: 700;
+    }
+    .runbook-action {
       font-size: 13px;
-      color: #E2E8F0;
-      line-height: 1.6;
-      margin-bottom: 14px;
+      color: var(--text-bright);
+      line-height: 1.5;
     }
-    .limitation-box {
-      background: rgba(0, 0, 0, 0.35);
-      border-radius: var(--radius-sm);
-      padding: 10px 12px;
+    .runbook-limitation {
       font-size: 11px;
       color: var(--text-muted);
-      line-height: 1.4;
-      border-left: 2px solid #64748B;
-    }
-
-    /* Code & JSON Sandbox Modal / Tab */
-    .tab-row {
-      display: flex;
-      gap: 6px;
-      margin-bottom: 12px;
-      border-bottom: 1px solid var(--border-subtle);
-      padding-bottom: 8px;
-    }
-    .tab-btn {
-      background: transparent;
-      border: none;
-      color: var(--text-muted);
-      font-size: 12px;
-      font-weight: 700;
-      padding: 4px 8px;
-      cursor: pointer;
-      border-radius: 4px;
-    }
-    .tab-btn.active {
-      color: #fff;
-      background: var(--bg-surface-elevated);
+      border-top: 1px solid var(--border-muted);
+      padding-top: 8px;
+      margin-top: 4px;
+      font-style: italic;
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    
-    <!-- Top Navigation Bar -->
-    <header class="top-nav">
-      <div class="brand-group">
-        <div class="brand-logo-mark">⚡</div>
-        <div class="brand-text">
-          <h1>RAGmortem <span class="version-tag">v0.2.0.dev0</span></h1>
-          <div class="brand-sub">Deterministic RAG Failure Forensic Observatory</div>
-        </div>
-      </div>
-      <div class="nav-actions">
-        <button class="btn btn-secondary" onclick="window.print()">🖨️ Export PDF / One-Pager</button>
-        <button class="btn btn-primary" onclick="runDiagnostics()">⚡ Re-Run Diagnostics</button>
-      </div>
-    </header>
 
-    <!-- Main Grid -->
-    <div class="dashboard-grid">
+  <!-- Top App Navigation -->
+  <header class="app-header">
+    <div class="header-left">
+      <div class="app-logo">
+        <span>RAGmortem</span>
+        <span class="logo-badge">v0.2.0.dev0</span>
+      </div>
+      <div class="header-divider"></div>
+      <div class="header-breadcrumb">
+        <span>telemetry</span> / <span id="hdr-case-id" style="color:var(--text-bright);">demo_01</span>
+      </div>
+    </div>
+    <div class="header-right">
+      <button class="btn" onclick="window.print()">Export Audit Document</button>
+      <button class="btn btn-primary" onclick="runDiagnostics()">Execute Triage</button>
+    </div>
+  </header>
+
+  <!-- Split Framework Layout -->
+  <div class="app-layout">
+    
+    <!-- Left Navigation & Input Control -->
+    <aside class="sidebar">
       
-      <!-- LEFT SIDEBAR: Scenarios & Trace Payload -->
-      <aside class="panel">
-        <div class="panel-header">
-          <span class="panel-title">Pre-Loaded Failure Scenarios</span>
-          <span style="font-size: 10px; color: var(--text-muted);">5 Curated Studies</span>
+      <!-- Scenario Selector -->
+      <div class="sidebar-section">
+        <div class="sidebar-title">
+          <span>Evaluated Scenarios</span>
+          <span>5 Records</span>
         </div>
-        
-        <div class="scenarios-list" id="preset-container">
+        <div class="case-nav-list" id="preset-container">
           <!-- Dynamically populated via JS -->
         </div>
+      </div>
 
-        <div class="panel-header" style="margin-top: 20px;">
-          <span class="panel-title">Trace Payload Inspector</span>
-          <span style="font-size: 10px; color: var(--text-muted);">Live Sandbox</span>
+      <!-- Live Trace Input Parameters -->
+      <div class="sidebar-section" style="flex-grow: 1; border-bottom: none;">
+        <div class="sidebar-title">
+          <span>Trace Telemetry</span>
+          <span>Input Fields</span>
         </div>
 
-        <div class="form-group">
-          <label>Query / User Question</label>
-          <input type="text" id="inp-query" placeholder="Question asked to RAG pipeline">
+        <div class="field-group">
+          <label class="field-label">User Query</label>
+          <input type="text" class="input-text" id="inp-query">
         </div>
 
-        <div class="form-group">
-          <label>Model Generated Answer</label>
-          <textarea id="inp-answer" rows="3" placeholder="Generated bot answer"></textarea>
+        <div class="field-group">
+          <label class="field-label">Model Generated Output</label>
+          <textarea class="input-textarea" id="inp-answer" rows="3"></textarea>
         </div>
 
-        <div class="form-group">
-          <label>Reference Ground Truth (Optional)</label>
-          <input type="text" id="inp-ref" placeholder="Expected true fact">
+        <div class="field-group">
+          <label class="field-label">Reference Ground Truth (Optional)</label>
+          <input type="text" class="input-text" id="inp-ref">
         </div>
 
-        <div class="form-group">
-          <label>Score Metric Scale</label>
-          <select id="inp-score-type">
+        <div class="field-group">
+          <label class="field-label">Score Scale Geometry</label>
+          <select class="input-select" id="inp-score-type">
             <option value="similarity">Cosine Similarity [-1.0, 1.0]</option>
             <option value="cosine_distance">Cosine Distance (1 - d)</option>
-            <option value="distance">Distance of Unknown Scale (Safety Guard)</option>
+            <option value="distance">Distance (Unknown Scale Guard)</option>
           </select>
         </div>
 
-        <div class="form-group">
-          <label>Retrieved Chunks & Candidate Pool (JSON)</label>
-          <textarea id="inp-chunks" rows="5"></textarea>
+        <div class="field-group">
+          <label class="field-label">Retrieved Chunks & Candidate Set (JSON)</label>
+          <textarea class="input-textarea" id="inp-chunks" rows="6"></textarea>
         </div>
 
-        <button class="btn btn-primary" style="width: 100%; justify-content: center; margin-top: 8px;" onclick="runDiagnostics()">
-          ⚡ Run Root-Cause Diagnosis
+        <button class="btn btn-primary" style="width: 100%; justify-content: center; margin-top: 4px;" onclick="runDiagnostics()">
+          Re-Analyze Trace
         </button>
-      </aside>
+      </div>
 
-      <!-- RIGHT MAIN: Forensic Workbench -->
-      <main class="workbench">
-        
-        <!-- 1. Executive Verdict Hero Card -->
-        <section class="verdict-hero">
-          <div class="verdict-header">
-            <div>
-              <div class="verdict-label">Deterministic Root-Cause Attribution Verdict</div>
-              <div id="verdict-badge-box">
-                <span class="verdict-badge badge-gen">🔴 Generation Failure Suspected</span>
-              </div>
-            </div>
-            <div class="meta-metrics">
-              <div class="metric-pill">
-                <div class="metric-val" id="val-conf">90%</div>
-                <div class="metric-name">Attribution Confidence</div>
-              </div>
-              <div class="metric-pill">
-                <div class="metric-val" id="val-mode" style="font-size: 15px; color: #38BDF8;">trace-only</div>
-                <div class="metric-name">Evaluation Mode</div>
-              </div>
+    </aside>
+
+    <!-- Main Forensic Workbench -->
+    <main class="workspace">
+      
+      <!-- 1. Executive Verdict Overview -->
+      <section class="verdict-panel">
+        <div class="verdict-top-bar">
+          <div class="verdict-title-group">
+            <div id="verdict-badge-box">
+              <span class="badge badge-fail verdict-main-badge">Attribution: Generation Failure Suspected</span>
             </div>
           </div>
-          <div style="font-size: 13px; color: var(--text-secondary); line-height: 1.6;" id="verdict-explanation">
-            Retrieved context had high semantic relevance to question, but the generated answer appears ungrounded or contradicted context.
+          <div class="verdict-meta-items">
+            <div class="meta-item">
+              <span class="meta-val" id="val-conf">90%</span>
+              <span class="meta-lbl">Attribution Confidence</span>
+            </div>
+            <div class="meta-item">
+              <span class="meta-val" id="val-mode">trace-only</span>
+              <span class="meta-lbl">Diagnostic Mode</span>
+            </div>
           </div>
-        </section>
+        </div>
+        <div class="verdict-summary-text" id="verdict-explanation">
+          Retrieved context had high semantic relevance to question, but the generated answer appears ungrounded or contradicted context.
+        </div>
+      </section>
 
-        <!-- 2. Primary 4-Stage Forensic Pipeline Flow -->
-        <section class="pipeline-container">
-          <div class="section-eyebrow">
-            <div class="section-heading">
-              <span>🔬 Interactive 4-Stage RAG Pipeline Breakdown</span>
-            </div>
-            <span style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);">FLOW: Query ➔ Retrieval ➔ Re-rank ➔ LLM</span>
-          </div>
+      <!-- 2. Execution Pipeline Waterfall (4-Stage Span Breakdown) -->
+      <section class="trace-section">
+        <div class="section-header">
+          <span class="section-title-text">Pipeline Execution Breakdown</span>
+          <span style="font-family: var(--font-mono); font-size: 11px; color: var(--text-muted);">span sequence: 01 ➔ 02 ➔ 03 ➔ 04</span>
+        </div>
 
-          <div class="flow-grid">
-            
-            <!-- Stage 1 -->
-            <div class="flow-node passed" id="node-stage1">
-              <div class="node-header">
-                <span class="node-number">01 / INPUT</span>
-                <span class="node-status status-pass">OK</span>
-              </div>
-              <div class="node-title">Query Formulation</div>
-              <div class="node-body">
-                <p style="font-weight: 600; color: #fff; font-size: 12px;" id="node1-query">"..."</p>
-                <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">
-                  Token Budget: <span id="node1-tokens">0</span> tokens
-                </div>
-              </div>
-            </div>
-
-            <!-- Stage 2 -->
-            <div class="flow-node" id="node-stage2">
-              <div id="breakpoint-stage2"></div>
-              <div class="node-header">
-                <span class="node-number">02 / SEARCH</span>
-                <span class="node-status" id="node2-status">PASS</span>
-              </div>
-              <div class="node-title">Vector Retrieval</div>
-              <div class="node-body">
-                <div class="score-meter">
-                  <div class="score-meta">
-                    <span style="color: var(--text-muted);">Top Chunk Score:</span>
-                    <span style="color: #38BDF8;" id="node2-score">0.88</span>
-                  </div>
-                  <div class="score-bar-track">
-                    <div class="score-bar-fill" id="node2-score-bar" style="width: 88%;"></div>
-                  </div>
-                  <div class="threshold-ticks">
-                    <span>0.00</span>
-                    <span style="color:#F43F5E;">0.47 Cutoff</span>
-                    <span style="color:#10B981;">0.53 High</span>
-                    <span>1.00</span>
-                  </div>
-                </div>
-                <div style="font-size: 11px; color: var(--text-muted);" id="node2-meta">
-                  1 chunk(s) evaluated
-                </div>
-              </div>
-            </div>
-
-            <!-- Stage 3 -->
-            <div class="flow-node" id="node-stage3">
-              <div id="breakpoint-stage3"></div>
-              <div class="node-header">
-                <span class="node-number">03 / RANKING</span>
-                <span class="node-status" id="node3-status">PASS</span>
-              </div>
-              <div class="node-title">Top-K Context Window</div>
-              <div class="node-body">
-                <div class="cutoff-diagram" id="node3-diagram">
-                  <div class="cutoff-item in-prompt">
-                    <span>Rank #1 (Score: 0.88)</span>
-                    <span>IN CONTEXT</span>
-                  </div>
-                  <div class="cutoff-divider">
-                    <span class="cutoff-label">✂️ PROMPT WINDOW CUTOFF</span>
-                  </div>
-                </div>
-                <div style="font-size: 11px; color: var(--text-muted);" id="node3-meta">
-                  Candidate margin evaluated.
-                </div>
-              </div>
-            </div>
-
-            <!-- Stage 4 -->
-            <div class="flow-node" id="node-stage4">
-              <div id="breakpoint-stage4"></div>
-              <div class="node-header">
-                <span class="node-number">04 / GENERATION</span>
-                <span class="node-status" id="node4-status">FAIL</span>
-              </div>
-              <div class="node-title">LLM Fact Grounding</div>
-              <div class="node-body">
-                <div class="fact-diff-box">
-                  <div class="fact-row">
-                    <span class="fact-lbl">Context Fact:</span>
-                    <span class="fact-txt-exp" id="node4-expected">Present in prompt context</span>
-                  </div>
-                  <div class="fact-row" style="border-top: 1px solid rgba(255,255,255,0.06); padding-top: 4px;">
-                    <span class="fact-lbl">Model Stated:</span>
-                    <span class="fact-txt-gen" id="node4-actual">Answer ungrounded</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-          </div>
-        </section>
-
-        <!-- 3. Forensic Evidence & Actionable Engineering Ticket -->
-        <section class="investigation-grid">
+        <div class="pipeline-lanes">
           
-          <!-- Evidence Stream -->
-          <div class="audit-card">
-            <div class="audit-card-title">
-              <span>🔍 Forensic Evidence Timeline</span>
+          <!-- Stage 1 -->
+          <div class="lane-box lane-healthy" id="lane-stage1">
+            <div class="lane-header">
+              <span class="lane-step">SPAN 01</span>
+              <span class="badge badge-pass">VALID</span>
             </div>
-            <div class="evidence-stream" id="evidence-stream">
-              <!-- Dynamically populated via JS -->
-            </div>
-          </div>
-
-          <!-- Actionable Engineering Ticket -->
-          <div class="audit-card">
-            <div class="audit-card-title">
-              <span>📋 Actionable Engineering Remedy</span>
-            </div>
-            <div class="ticket-container">
-              <div>
-                <div class="ticket-badge-row">
-                  <span class="ticket-chip" id="ticket-team">Prompt Engineering</span>
-                  <span style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);">Severity: High</span>
-                </div>
-                <div class="ticket-body" id="ticket-body">
-                  Inspect generator prompt instructions, attention distribution, or system prompt grounding constraints.
-                </div>
-              </div>
-              <div class="limitation-box" id="ticket-limitation">
-                Limitations: What this diagnostic mode cannot verify.
+            <div class="lane-title">Query Ingestion</div>
+            <div class="lane-body">
+              <p style="font-size: 12px; color: var(--text-bright); font-weight: 500;" id="lane1-query">"..."</p>
+              <div style="font-size: 11px; color: var(--text-muted); margin-top: 4px;">
+                Input length: <span id="lane1-tokens" style="font-family: var(--font-mono); color: var(--text-secondary);">0</span> words
               </div>
             </div>
           </div>
 
-        </section>
+          <!-- Stage 2 -->
+          <div class="lane-box" id="lane-stage2">
+            <div class="lane-header">
+              <span class="lane-step">SPAN 02</span>
+              <span class="badge badge-pass" id="lane2-status">PASS</span>
+            </div>
+            <div class="lane-title">Vector Search (Bi-Encoder)</div>
+            <div class="lane-body">
+              <div class="metric-row">
+                <div class="metric-row-header">
+                  <span style="color: var(--text-secondary);">Top Relevance</span>
+                  <span style="color: var(--text-bright); font-family: var(--font-mono);" id="lane2-score">0.88</span>
+                </div>
+                <div class="metric-progress">
+                  <div class="metric-progress-bar" id="lane2-progress" style="width: 88%;"></div>
+                </div>
+                <div class="metric-ticks">
+                  <span>0.00</span>
+                  <span style="color: var(--status-fail-text);">0.47 Cutoff</span>
+                  <span style="color: var(--status-pass-text);">0.53 High</span>
+                  <span>1.00</span>
+                </div>
+              </div>
+              <div style="font-size: 11px; color: var(--text-muted);" id="lane2-meta">
+                Candidate evaluation complete
+              </div>
+            </div>
+          </div>
 
-      </main>
-    </div>
+          <!-- Stage 3 -->
+          <div class="lane-box" id="lane-stage3">
+            <div class="lane-header">
+              <span class="lane-step">SPAN 03</span>
+              <span class="badge badge-pass" id="lane3-status">PASS</span>
+            </div>
+            <div class="lane-title">Top-K Context Cutoff</div>
+            <div class="lane-body">
+              <div class="cutoff-list" id="lane3-cutoff-list">
+                <!-- Dynamically populated via JS -->
+              </div>
+              <div style="font-size: 11px; color: var(--text-muted);" id="lane3-meta">
+                Prompt context window evaluated
+              </div>
+            </div>
+          </div>
+
+          <!-- Stage 4 -->
+          <div class="lane-box" id="lane-stage4">
+            <div class="lane-header">
+              <span class="lane-step">SPAN 04</span>
+              <span class="badge badge-fail" id="lane4-status">DEFECT</span>
+            </div>
+            <div class="lane-title">LLM Fact Grounding</div>
+            <div class="lane-body">
+              <div class="diff-container">
+                <div>
+                  <div class="diff-item-label">Prompt Context Fact:</div>
+                  <div class="diff-expected" id="lane4-expected">Verified in prompt context</div>
+                </div>
+                <div style="border-top: 1px solid var(--border-muted); padding-top: 4px;">
+                  <div class="diff-item-label">Generated Response:</div>
+                  <div class="diff-actual" id="lane4-actual">Ungrounded response</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+      <!-- 3. Bottom Grid: Evidence Trail & Remediation Runbook -->
+      <section class="bottom-grid">
+        
+        <!-- Evidence Trail -->
+        <div class="audit-pane">
+          <div class="pane-header">
+            <span>Diagnostic Evidence Trail</span>
+          </div>
+          <ul class="evidence-list" id="evidence-stream">
+            <!-- Dynamically populated via JS -->
+          </ul>
+        </div>
+
+        <!-- Remediation Protocol -->
+        <div class="audit-pane">
+          <div class="pane-header">
+            <span>Remediation Protocol</span>
+          </div>
+          <div class="runbook-card">
+            <div class="runbook-meta">
+              <span class="runbook-team" id="ticket-team">PROMPT_ENGINEERING</span>
+              <span style="color: var(--text-muted);">PRIORITY: HIGH</span>
+            </div>
+            <div class="runbook-action" id="ticket-body">
+              Inspect generator prompt instructions, attention distribution, or system prompt grounding constraints.
+            </div>
+            <div class="runbook-limitation" id="ticket-limitation">
+              Boundary: Mode cannot verify external corpus unretrieved documents.
+            </div>
+          </div>
+        </div>
+
+      </section>
+
+    </main>
   </div>
 
   <script>
@@ -1054,30 +892,31 @@ INDEX_HTML = r"""<!DOCTYPE html>
     function renderPresets() {
       const c = document.getElementById('preset-container');
       c.innerHTML = demoCases.map((cs, idx) => {
-        let tagClass = 'tag-unk', tagLabel = 'UNKNOWN';
+        let badgeClass = 'badge-neutral', badgeLabel = 'UNKNOWN';
         const cid = cs.id.toLowerCase();
-        if (cid.includes('generation')) { tagClass = 'tag-gen'; tagLabel = 'GENERATION'; }
-        else if (cid.includes('ranking')) { tagClass = 'tag-rank'; tagLabel = 'RANKING'; }
-        else if (cid.includes('abstention') || cid.includes('no_failure')) { tagClass = 'tag-ok'; tagLabel = 'HEALTHY'; }
+        if (cid.includes('generation')) { badgeClass = 'badge-fail'; badgeLabel = 'GEN_FAIL'; }
+        else if (cid.includes('ranking')) { badgeClass = 'badge-warn'; badgeLabel = 'RANK_CUT'; }
+        else if (cid.includes('abstention') || cid.includes('no_failure')) { badgeClass = 'badge-pass'; badgeLabel = 'CLEAN'; }
         
         return `
-          <div class="scenario-card ${idx === 0 ? 'active' : ''}" onclick="loadCase(${idx})">
-            <div class="scenario-top">
-              <span class="scenario-name">Case ${idx + 1}: ${cs.id.replace('demo_', '').replace(/_/g, ' ')}</span>
-              <span class="scenario-tag ${tagClass}">${tagLabel}</span>
+          <div class="case-nav-item ${idx === 0 ? 'active' : ''}" onclick="loadCase(${idx})">
+            <div class="case-nav-top">
+              <span class="case-nav-name">Trace 0${idx + 1}</span>
+              <span class="badge ${badgeClass}">${badgeLabel}</span>
             </div>
-            <div class="scenario-query">${cs.question}</div>
+            <div class="case-nav-query">${cs.question}</div>
           </div>
         `;
       }).join('');
     }
 
     function loadCase(idx) {
-      document.querySelectorAll('.scenario-card').forEach((b, i) => {
+      document.querySelectorAll('.case-nav-item').forEach((b, i) => {
         b.classList.toggle('active', i === idx);
       });
       const cs = demoCases[idx];
       currentCase = cs;
+      document.getElementById('hdr-case-id').innerText = cs.id;
       document.getElementById('inp-query').value = cs.question || '';
       document.getElementById('inp-answer').value = cs.answer || '';
       document.getElementById('inp-ref').value = cs.reference_answer || '';
@@ -1096,7 +935,7 @@ INDEX_HTML = r"""<!DOCTYPE html>
       try {
         chunks = JSON.parse(document.getElementById('inp-chunks').value || '[]');
       } catch (e) {
-        alert("Invalid JSON in chunks field: " + e.message);
+        alert("JSON syntax error in chunks: " + e.message);
         return;
       }
 
@@ -1124,142 +963,119 @@ INDEX_HTML = r"""<!DOCTYPE html>
         const res = await resp.json();
         renderResult(res, payload);
       } catch (err) {
-        alert("Diagnosis request failed: " + err);
+        alert("Diagnosis failed: " + err);
       }
     }
 
     function renderResult(res, input) {
       const diag = (res.diagnosis || 'unknown').toLowerCase();
-      let badgeClass = 'badge-unk';
-      let badgeIcon = '⚪';
-      let teamChip = 'Investigation Team';
+      let mainBadgeClass = 'badge-neutral';
+      let teamIdentifier = 'TRIAGE_TEAM';
 
-      // Reset node styles
-      const n1 = document.getElementById('node-stage1');
-      const n2 = document.getElementById('node-stage2');
-      const n3 = document.getElementById('node-stage3');
-      const n4 = document.getElementById('node-stage4');
-      
-      n1.className = 'flow-node passed';
-      n2.className = 'flow-node passed';
-      n3.className = 'flow-node passed';
-      n4.className = 'flow-node passed';
+      const l1 = document.getElementById('lane-stage1');
+      const l2 = document.getElementById('lane-stage2');
+      const l3 = document.getElementById('lane-stage3');
+      const l4 = document.getElementById('lane-stage4');
 
-      document.getElementById('breakpoint-stage2').innerHTML = '';
-      document.getElementById('breakpoint-stage3').innerHTML = '';
-      document.getElementById('breakpoint-stage4').innerHTML = '';
+      l1.className = 'lane-box lane-healthy';
+      l2.className = 'lane-box';
+      l3.className = 'lane-box';
+      l4.className = 'lane-box';
 
-      document.getElementById('node2-status').className = 'node-status status-pass';
-      document.getElementById('node2-status').innerText = 'PASS';
-      document.getElementById('node3-status').className = 'node-status status-pass';
-      document.getElementById('node3-status').innerText = 'PASS';
-      document.getElementById('node4-status').className = 'node-status status-pass';
-      document.getElementById('node4-status').innerText = 'PASS';
+      document.getElementById('lane2-status').className = 'badge badge-pass';
+      document.getElementById('lane2-status').innerText = 'PASS';
+      document.getElementById('lane3-status').className = 'badge badge-pass';
+      document.getElementById('lane3-status').innerText = 'PASS';
+      document.getElementById('lane4-status').className = 'badge badge-pass';
+      document.getElementById('lane4-status').innerText = 'PASS';
 
       if (diag.includes('generation')) {
-        badgeClass = 'badge-gen';
-        badgeIcon = '🔴';
-        teamChip = 'Prompt Engineering Team';
-        n4.className = 'flow-node breakpoint-alert';
-        document.getElementById('node4-status').className = 'node-status status-fail';
-        document.getElementById('node4-status').innerText = 'FAIL';
-        document.getElementById('breakpoint-stage4').innerHTML = `
-          <div class="breakpoint-pill">🚨 BREAKPOINT: HALLUCINATION</div>
-        `;
+        mainBadgeClass = 'badge-fail';
+        teamIdentifier = 'PROMPT_ENGINEERING';
+        l4.className = 'lane-box lane-defect';
+        document.getElementById('lane4-status').className = 'badge badge-fail';
+        document.getElementById('lane4-status').innerText = 'DEFECT';
       } else if (diag.includes('ranking')) {
-        badgeClass = 'badge-rank';
-        badgeIcon = '🟠';
-        teamChip = 'Re-Ranker & Indexing Team';
-        n3.className = 'flow-node breakpoint-warning';
-        document.getElementById('node3-status').className = 'node-status status-warn';
-        document.getElementById('node3-status').innerText = 'CUTOFF';
-        document.getElementById('breakpoint-stage3').innerHTML = `
-          <div class="breakpoint-pill warning-pill">⚠️ BREAKPOINT: TOP-K CUTOFF</div>
-        `;
+        mainBadgeClass = 'badge-warn';
+        teamIdentifier = 'RE_RANKER_CONFIG';
+        l3.className = 'lane-box lane-warning';
+        document.getElementById('lane3-status').className = 'badge badge-warn';
+        document.getElementById('lane3-status').innerText = 'CUTOFF';
       } else if (diag.includes('retrieval')) {
-        badgeClass = 'badge-ret';
-        badgeIcon = '🟣';
-        teamChip = 'Search & Embeddings Team';
-        n2.className = 'flow-node breakpoint-alert';
-        document.getElementById('node2-status').className = 'node-status status-fail';
-        document.getElementById('node2-status').innerText = 'MISS';
-        document.getElementById('breakpoint-stage2').innerHTML = `
-          <div class="breakpoint-pill">🚨 BREAKPOINT: RETRIEVAL MISS</div>
-        `;
+        mainBadgeClass = 'badge-fail';
+        teamIdentifier = 'SEARCH_EMBEDDINGS';
+        l2.className = 'lane-box lane-defect';
+        document.getElementById('lane2-status').className = 'badge badge-fail';
+        document.getElementById('lane2-status').innerText = 'MISS';
       } else if (diag.includes('no_failure') || diag.includes('abstain')) {
-        badgeClass = 'badge-ok';
-        badgeIcon = '🟢';
-        teamChip = 'Quality & Telemetry Monitoring';
+        mainBadgeClass = 'badge-pass';
+        teamIdentifier = 'SYSTEM_HEALTHY';
       } else {
-        badgeClass = 'badge-unk';
-        badgeIcon = '⚪';
-        teamChip = 'Telemetry Instrumentation Team';
-        n2.className = 'flow-node';
-        n3.className = 'flow-node';
-        n4.className = 'flow-node';
-        document.getElementById('node2-status').innerText = 'INCONCLUSIVE';
-        document.getElementById('node3-status').innerText = 'INCONCLUSIVE';
-        document.getElementById('node4-status').innerText = 'INCONCLUSIVE';
+        mainBadgeClass = 'badge-neutral';
+        teamIdentifier = 'TELEMETRY_LOGGING';
+        document.getElementById('lane2-status').innerText = 'UNKNOWN';
+        document.getElementById('lane3-status').innerText = 'UNKNOWN';
+        document.getElementById('lane4-status').innerText = 'UNKNOWN';
       }
 
-      // Hero Elements
+      // Top Verdict Bar
       document.getElementById('verdict-badge-box').innerHTML = `
-        <span class="verdict-badge ${badgeClass}">${badgeIcon} ${res.diagnosis_english}</span>
+        <span class="badge ${mainBadgeClass} verdict-main-badge">${res.diagnosis_english}</span>
       `;
       document.getElementById('val-conf').innerText = Math.round((res.confidence || 0) * 100) + '%';
       document.getElementById('val-mode').innerText = res.mode || 'trace-only';
       document.getElementById('verdict-explanation').innerText = (res.evidence && res.evidence[0]) || res.diagnosis_english;
 
-      // Stage 1 (Query)
-      document.getElementById('node1-query').innerText = '"' + (input.question || '') + '"';
-      document.getElementById('node1-tokens').innerText = (input.question || '').split(/\s+/).filter(Boolean).length;
+      // Span 01: Query
+      document.getElementById('lane1-query').innerText = '"' + (input.question || '') + '"';
+      document.getElementById('lane1-tokens').innerText = (input.question || '').split(/\s+/).filter(Boolean).length;
 
-      // Stage 2 (Retrieval)
+      // Span 02: Search
       const chunks = input.retrieved || [];
       const topScore = chunks.length > 0 && chunks[0].score != null ? chunks[0].score : null;
       if (topScore != null) {
-        document.getElementById('node2-score').innerText = topScore.toFixed(3);
+        document.getElementById('lane2-score').innerText = topScore.toFixed(3);
         const pct = Math.max(0, Math.min(100, Math.round(topScore * 100)));
-        document.getElementById('node2-score-bar').style.width = pct + '%';
+        document.getElementById('lane2-progress').style.width = pct + '%';
       } else {
-        document.getElementById('node2-score').innerText = 'N/A';
-        document.getElementById('node2-score-bar').style.width = '0%';
+        document.getElementById('lane2-score').innerText = 'N/A';
+        document.getElementById('lane2-progress').style.width = '0%';
       }
-      document.getElementById('node2-meta').innerText = `${chunks.length} candidate chunk(s) evaluated`;
+      document.getElementById('lane2-meta').innerText = `${chunks.length} chunks evaluated in candidate pool`;
 
-      // Stage 3 (Ranking Cutoff Diagram)
-      const diagram = document.getElementById('node3-diagram');
+      // Span 03: Top-K Cutoff List
+      const cutoffList = document.getElementById('lane3-cutoff-list');
       const cands = (input.candidates && input.candidates.length > 0) ? input.candidates : chunks;
       const cutoffK = input.top_k || 2;
-      let diagHtml = '';
+      let cutHtml = '';
       if (cands.length > 0) {
         cands.slice(0, cutoffK).forEach((c, i) => {
-          diagHtml += `<div class="cutoff-item in-prompt"><span>Rank #${i+1} (${c.score != null ? c.score.toFixed(2) : '-'})</span><span>IN PROMPT</span></div>`;
+          cutHtml += `<div class="cutoff-chunk chunk-admitted"><span>Rank #${i+1} (${c.score != null ? c.score.toFixed(2) : '-'})</span><span>IN PROMPT</span></div>`;
         });
       }
-      diagHtml += `<div class="cutoff-divider"><span class="cutoff-label">✂️ PROMPT WINDOW CUTOFF (TOP-${cutoffK})</span></div>`;
+      cutHtml += `<div class="cutoff-line"><span class="cutoff-line-label">TOP-K CUTOFF (WINDOW = ${cutoffK})</span></div>`;
       if (cands.length > cutoffK) {
         cands.slice(cutoffK, cutoffK + 2).forEach((c, i) => {
-          diagHtml += `<div class="cutoff-item dropped-candidate"><span>Rank #${cutoffK + i + 1} (${c.score != null ? c.score.toFixed(2) : '-'})</span><span>DROPPED</span></div>`;
+          cutHtml += `<div class="cutoff-chunk chunk-pruned"><span>Rank #${cutoffK + i + 1} (${c.score != null ? c.score.toFixed(2) : '-'})</span><span>DROPPED</span></div>`;
         });
       }
-      diagram.innerHTML = diagHtml;
+      cutoffList.innerHTML = cutHtml;
 
-      // Stage 4 (Fact Grounding)
-      document.getElementById('node4-expected').innerText = input.reference_answer ? `"${input.reference_answer}"` : "Evidence chunk verified in prompt";
-      document.getElementById('node4-actual').innerText = `"${(input.answer || '').slice(0, 110)}${(input.answer || '').length > 110 ? '...' : ''}"`;
+      // Span 04: Generation Diff
+      document.getElementById('lane4-expected').innerText = input.reference_answer ? `"${input.reference_answer}"` : "Retrieved evidence in prompt";
+      document.getElementById('lane4-actual').innerText = `"${(input.answer || '').slice(0, 110)}${(input.answer || '').length > 110 ? '...' : ''}"`;
 
-      // Evidence Stream
+      // Evidence Trail
       const evStream = document.getElementById('evidence-stream');
       evStream.innerHTML = (res.evidence || []).map((e, idx) => `
-        <div class="evidence-event">
-          <div class="event-icon">${idx === 0 ? '🎯' : '📊'}</div>
-          <div class="event-desc">${e}</div>
-        </div>
+        <li class="evidence-entry">
+          <span class="evidence-tag">EV-${String(idx + 1).padStart(2, '0')}</span>
+          <span>${e}</span>
+        </li>
       `).join('');
 
-      // Ticket Box
-      document.getElementById('ticket-team').innerText = teamChip;
+      // Remediation Protocol
+      document.getElementById('ticket-team').innerText = teamIdentifier;
       document.getElementById('ticket-body').innerText = res.suggested_next_check || '';
       document.getElementById('ticket-limitation').innerText = res.what_this_cannot_tell_you || '';
     }

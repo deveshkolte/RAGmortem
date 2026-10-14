@@ -1,8 +1,7 @@
-"""Executive Enterprise HTML Report Generator for RAGmortem.
+"""Enterprise Diagnostic Report Generator for RAGmortem.
 
-Renders self-contained, air-gapped, zero-dependency executive audit reports
-with interactive 4-stage RAG pipeline visualizations, forensic breakpoint alerts,
-executive KPIs, and engineering remediation tickets.
+Produces self-contained, air-gapped HTML audit reports with an enterprise
+telemetry interface (inspired by Datadog, Linear, and GitHub Enterprise).
 """
 
 from __future__ import annotations
@@ -27,7 +26,7 @@ def generate_html_report(
     is_demo: bool = False,
     title: str = "RAGmortem Enterprise Diagnostic Audit",
 ) -> str:
-    """Generate a self-contained, executive enterprise HTML report."""
+    """Generate a self-contained, enterprise-grade HTML diagnostic report."""
     now_str = datetime.now().strftime("%B %d, %Y • %H:%M:%S UTC")
     total_cases = summary_data.get("total_cases", len(cases_data))
     unknown_count = summary_data.get("unknown_count", 0)
@@ -47,63 +46,56 @@ def generate_html_report(
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{_escape(title)}</title>
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <style>
     :root {{
-      --font-sans: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-      --font-mono: 'JetBrains Mono', ui-monospace, Menlo, Monaco, Consolas, monospace;
-      
-      --bg-base: #07090E;
-      --bg-surface: #0E131F;
-      --bg-surface-elevated: #141B2D;
-      --bg-surface-glass: rgba(14, 19, 31, 0.75);
-      
-      --border-subtle: rgba(255, 255, 255, 0.07);
-      --border-light: rgba(255, 255, 255, 0.12);
-      
-      --text-primary: #F8FAFC;
-      --text-secondary: #94A3B8;
-      --text-muted: #64748B;
-      
-      --danger-main: #F43F5E;
-      --danger-glow: rgba(244, 63, 94, 0.25);
-      --danger-bg: rgba(244, 63, 94, 0.10);
-      --danger-border: rgba(244, 63, 94, 0.35);
-      
-      --warning-main: #F59E0B;
-      --warning-glow: rgba(245, 158, 11, 0.25);
-      --warning-bg: rgba(245, 158, 11, 0.10);
-      --warning-border: rgba(245, 158, 11, 0.35);
-      
-      --success-main: #10B981;
-      --success-glow: rgba(16, 185, 129, 0.25);
-      --success-bg: rgba(16, 185, 129, 0.10);
-      --success-border: rgba(16, 185, 129, 0.35);
-      
-      --info-main: #38BDF8;
-      --purple-main: #A855F7;
-      
-      --radius-sm: 6px;
-      --radius-md: 10px;
-      --radius-lg: 16px;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", Menlo, Monaco, Consolas, monospace;
+
+      --bg-canvas: #090B0E;
+      --bg-panel: #11141A;
+      --bg-subtle: #161B22;
+      --bg-hover: #1C212B;
+
+      --border-default: #262D38;
+      --border-muted: #1D232C;
+      --border-emphasis: #384252;
+
+      --text-bright: #F0F3F6;
+      --text-primary: #C9D1D9;
+      --text-secondary: #8B949E;
+      --text-muted: #656D76;
+
+      --status-fail-text: #F85149;
+      --status-fail-bg: rgba(248, 81, 73, 0.08);
+      --status-fail-border: rgba(248, 81, 73, 0.28);
+
+      --status-warn-text: #D29922;
+      --status-warn-bg: rgba(210, 153, 34, 0.08);
+      --status-warn-border: rgba(210, 153, 34, 0.28);
+
+      --status-pass-text: #3FB950;
+      --status-pass-bg: rgba(63, 185, 80, 0.08);
+      --status-pass-border: rgba(63, 185, 80, 0.28);
+
+      --status-neutral-text: #8B949E;
+      --status-neutral-bg: rgba(139, 148, 158, 0.08);
+      --status-neutral-border: rgba(139, 148, 158, 0.28);
+
+      --radius-sm: 4px;
+      --radius-md: 6px;
+      --radius-lg: 8px;
     }}
 
     * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-    
+
     body {{
       font-family: var(--font-sans);
-      background-color: var(--bg-base);
-      background-image: 
-        radial-gradient(circle at 10% 0%, rgba(99, 102, 241, 0.14) 0%, transparent 45%),
-        radial-gradient(circle at 90% 5%, rgba(244, 63, 94, 0.08) 0%, transparent 40%),
-        radial-gradient(circle at 50% 50%, rgba(14, 165, 233, 0.04) 0%, transparent 60%);
-      background-attachment: fixed;
+      background-color: var(--bg-canvas);
       color: var(--text-primary);
+      font-size: 13px;
       line-height: 1.5;
       min-height: 100vh;
-      padding: 32px 36px 64px;
+      padding: 32px 40px 64px;
       -webkit-font-smoothing: antialiased;
     }}
 
@@ -112,341 +104,248 @@ def generate_html_report(
       margin: 0 auto;
     }}
 
-    /* Top Nav */
-    .header {{
-      background: var(--bg-surface-glass);
-      backdrop-filter: blur(16px);
-      -webkit-backdrop-filter: blur(16px);
-      border: 1px solid var(--border-light);
+    /* Top Header */
+    .app-header {{
+      background: var(--bg-panel);
+      border: 1px solid var(--border-default);
       border-radius: var(--radius-lg);
-      padding: 20px 28px;
+      padding: 16px 24px;
       display: flex;
       justify-content: space-between;
       align-items: center;
       margin-bottom: 24px;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35);
     }}
-    .brand-title {{
-      display: flex;
-      align-items: center;
-      gap: 14px;
-    }}
-    .brand-badge {{
-      background: linear-gradient(135deg, #6366F1 0%, #EC4899 100%);
-      color: #fff;
-      font-size: 11px;
-      font-weight: 800;
-      letter-spacing: 0.06em;
-      text-transform: uppercase;
-      padding: 4px 10px;
-      border-radius: 6px;
-      box-shadow: 0 0 12px rgba(99, 102, 241, 0.4);
-    }}
-    h1 {{
-      font-size: 20px;
-      font-weight: 800;
-      color: #fff;
-      letter-spacing: -0.02em;
-    }}
-    .header-meta {{
-      text-align: right;
-      font-size: 12px;
-      color: var(--text-muted);
-    }}
-    .print-btn {{
-      margin-top: 6px;
-      background: var(--bg-surface-elevated);
-      border: 1px solid var(--border-light);
-      padding: 6px 14px;
-      border-radius: var(--radius-sm);
-      font-size: 12px;
-      font-weight: 600;
-      color: var(--text-primary);
-      cursor: pointer;
-      transition: all 0.2s ease;
-    }}
-    .print-btn:hover {{
-      background: #1E283F;
-      border-color: rgba(255, 255, 255, 0.25);
-    }}
-
-    /* Notice Banner */
-    .demo-notice {{
-      background: rgba(245, 158, 11, 0.1);
-      border: 1px solid rgba(245, 158, 11, 0.3);
-      border-radius: var(--radius-md);
-      padding: 12px 18px;
-      margin-bottom: 24px;
-      font-size: 13px;
-      color: #FDE68A;
+    .header-brand {{
       display: flex;
       align-items: center;
       gap: 12px;
     }}
+    .logo-badge {{
+      background: var(--border-emphasis);
+      color: var(--text-bright);
+      font-size: 10px;
+      font-family: var(--font-mono);
+      font-weight: 700;
+      padding: 2px 7px;
+      border-radius: var(--radius-sm);
+    }}
+    h1 {{
+      font-size: 16px;
+      font-weight: 700;
+      color: var(--text-bright);
+      letter-spacing: -0.01em;
+    }}
+    .header-meta {{
+      text-align: right;
+      font-size: 11px;
+      font-family: var(--font-mono);
+      color: var(--text-secondary);
+    }}
+    .print-btn {{
+      margin-top: 6px;
+      background: var(--bg-subtle);
+      border: 1px solid var(--border-default);
+      padding: 5px 12px;
+      border-radius: var(--radius-sm);
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--text-bright);
+      cursor: pointer;
+      font-family: var(--font-sans);
+    }}
+    .print-btn:hover {{
+      background: var(--bg-hover);
+    }}
 
-    /* KPI Summary Cards */
-    .kpi-grid {{
+    /* Notice Banner */
+    .demo-notice {{
+      background: var(--status-warn-bg);
+      border: 1px solid var(--status-warn-border);
+      border-radius: var(--radius-md);
+      padding: 10px 16px;
+      margin-bottom: 20px;
+      font-size: 12px;
+      color: var(--status-warn-text);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }}
+
+    /* KPI Summary Row */
+    .kpi-row {{
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
       gap: 16px;
       margin-bottom: 24px;
     }}
-    .kpi-card {{
-      background: var(--bg-surface);
-      border: 1px solid var(--border-subtle);
+    .kpi-block {{
+      background: var(--bg-panel);
+      border: 1px solid var(--border-default);
       border-radius: var(--radius-md);
-      padding: 20px;
-      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.25);
-      position: relative;
-      overflow: hidden;
+      padding: 16px 18px;
     }}
-    .kpi-card::before {{
-      content: '';
-      position: absolute;
-      top: 0; left: 0; right: 0;
-      height: 3px;
-      background: rgba(255, 255, 255, 0.1);
-    }}
-    .kpi-card.kpi-gen::before {{ background: var(--danger-main); }}
-    .kpi-card.kpi-rank::before {{ background: var(--warning-main); }}
-    .kpi-card.kpi-ok::before {{ background: var(--success-main); }}
-    .kpi-card.kpi-unk::before {{ background: #94A3B8; }}
-
     .kpi-label {{
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 700;
       color: var(--text-muted);
       text-transform: uppercase;
       letter-spacing: 0.05em;
       margin-bottom: 6px;
     }}
-    .kpi-value {{
-      font-size: 32px;
+    .kpi-val {{
+      font-size: 26px;
       font-weight: 800;
-      color: var(--text-primary);
+      color: var(--text-bright);
       font-family: var(--font-mono);
       display: flex;
       align-items: baseline;
       gap: 8px;
     }}
-    .kpi-subtext {{
+    .kpi-meta {{
       font-size: 11px;
       color: var(--text-secondary);
       margin-top: 4px;
     }}
 
-    /* Toolbar Filter Tabs */
+    /* Filter Bar */
     .toolbar {{
-      background: var(--bg-surface);
-      border: 1px solid var(--border-subtle);
+      background: var(--bg-panel);
+      border: 1px solid var(--border-default);
       border-radius: var(--radius-md);
-      padding: 12px 20px;
-      margin-bottom: 24px;
+      padding: 10px 16px;
+      margin-bottom: 20px;
       display: flex;
       justify-content: space-between;
       align-items: center;
       flex-wrap: wrap;
-      gap: 12px;
+      gap: 10px;
     }}
     .filter-tabs {{
       display: flex;
-      gap: 8px;
+      gap: 6px;
       flex-wrap: wrap;
     }}
     .filter-tab {{
       background: transparent;
-      border: 1px solid var(--border-subtle);
+      border: 1px solid var(--border-default);
       border-radius: var(--radius-sm);
-      padding: 6px 14px;
-      font-size: 12px;
-      font-weight: 700;
+      padding: 4px 10px;
+      font-size: 11px;
+      font-weight: 600;
       color: var(--text-secondary);
       cursor: pointer;
-      transition: all 0.2s ease;
     }}
     .filter-tab.active, .filter-tab:hover {{
-      background: rgba(99, 102, 241, 0.18);
-      color: #fff;
-      border-color: #6366F1;
-      box-shadow: 0 0 12px rgba(99, 102, 241, 0.2);
+      background: var(--bg-hover);
+      color: var(--text-bright);
+      border-color: var(--border-emphasis);
     }}
 
-    /* Case Card */
-    .case-card {{
-      background: var(--bg-surface);
-      border: 1px solid var(--border-subtle);
+    /* Trace Audit Card */
+    .trace-card {{
+      background: var(--bg-panel);
+      border: 1px solid var(--border-default);
       border-radius: var(--radius-lg);
-      margin-bottom: 28px;
-      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      margin-bottom: 24px;
       overflow: hidden;
-      transition: transform 0.2s ease, border-color 0.2s ease;
     }}
-    .case-card:hover {{
-      border-color: rgba(255, 255, 255, 0.15);
-    }}
-    .case-header {{
-      padding: 20px 26px;
-      border-bottom: 1px solid var(--border-subtle);
+    .card-top {{
+      padding: 14px 20px;
+      border-bottom: 1px solid var(--border-default);
       display: flex;
       justify-content: space-between;
       align-items: center;
-      background: rgba(20, 27, 45, 0.4);
+      background: var(--bg-subtle);
       flex-wrap: wrap;
-      gap: 14px;
+      gap: 12px;
     }}
-    .case-id {{
+    .card-id {{
       font-family: var(--font-mono);
-      font-size: 12px;
-      font-weight: 700;
-      color: var(--text-secondary);
-      background: rgba(0, 0, 0, 0.4);
-      padding: 4px 10px;
-      border-radius: var(--radius-sm);
-      border: 1px solid var(--border-subtle);
-    }}
-    .verdict-badge {{
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      font-size: 14px;
-      font-weight: 800;
-      padding: 6px 14px;
-      border-radius: 9999px;
-      letter-spacing: -0.01em;
-    }}
-    .badge-gen {{
-      background: var(--danger-bg);
-      color: #FDA4AF;
-      border: 1px solid var(--danger-border);
-      box-shadow: 0 0 16px var(--danger-glow);
-    }}
-    .badge-rank {{
-      background: var(--warning-bg);
-      color: #FDE68A;
-      border: 1px solid var(--warning-border);
-      box-shadow: 0 0 16px var(--warning-glow);
-    }}
-    .badge-ret {{
-      background: rgba(168, 85, 247, 0.12);
-      color: #E9D5FF;
-      border: 1px solid rgba(168, 85, 247, 0.35);
-      box-shadow: 0 0 16px rgba(168, 85, 247, 0.25);
-    }}
-    .badge-ok {{
-      background: var(--success-bg);
-      color: #A7F3D0;
-      border: 1px solid var(--success-border);
-      box-shadow: 0 0 16px var(--success-glow);
-    }}
-    .badge-unk {{
-      background: rgba(148, 163, 184, 0.12);
-      color: #E2E8F0;
-      border: 1px solid rgba(148, 163, 184, 0.25);
-    }}
-
-    /* 4-Stage Visual Pipeline Diagram */
-    .pipeline-section {{
-      padding: 24px 26px;
-      background: var(--bg-surface);
-      border-bottom: 1px solid var(--border-subtle);
-    }}
-    .pipeline-title {{
       font-size: 11px;
-      font-weight: 800;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      margin-bottom: 18px;
-      display: flex;
-      justify-content: space-between;
-    }}
-    .flow-grid {{
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 16px;
-      position: relative;
-    }}
-    @media (max-width: 960px) {{
-      .flow-grid {{ grid-template-columns: 1fr; }}
-    }}
-
-    .flow-node {{
-      background: var(--bg-surface-elevated);
-      border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-md);
-      padding: 16px;
-      display: flex;
-      flex-direction: column;
-      position: relative;
-    }}
-    .flow-node.breakpoint-alert {{
-      border-color: var(--danger-main);
-      background: rgba(244, 63, 94, 0.05);
-      box-shadow: 0 0 20px rgba(244, 63, 94, 0.15);
-    }}
-    .flow-node.breakpoint-warning {{
-      border-color: var(--warning-main);
-      background: rgba(245, 158, 11, 0.05);
-      box-shadow: 0 0 20px rgba(245, 158, 11, 0.15);
-    }}
-    .flow-node.passed {{
-      border-color: rgba(16, 185, 129, 0.35);
-    }}
-
-    .breakpoint-pill {{
-      position: absolute;
-      top: -11px;
-      left: 50%;
-      transform: translateX(-50%);
-      background: var(--danger-main);
-      color: #fff;
-      font-size: 9px;
-      font-weight: 800;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
+      font-weight: 700;
+      color: var(--text-bright);
+      background: var(--bg-canvas);
       padding: 3px 8px;
-      border-radius: 9999px;
-      box-shadow: 0 0 12px var(--danger-main);
-      z-index: 2;
+      border-radius: var(--radius-sm);
+      border: 1px solid var(--border-default);
     }}
-    .breakpoint-pill.warning-pill {{
-      background: var(--warning-main);
-      box-shadow: 0 0 12px var(--warning-main);
-    }}
-
-    .node-header {{
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 10px;
-      padding-bottom: 6px;
-      border-bottom: 1px solid var(--border-subtle);
-    }}
-    .node-number {{
+    .badge {{
       font-family: var(--font-mono);
       font-size: 10px;
       font-weight: 700;
-      color: var(--text-muted);
+      padding: 2px 8px;
+      border-radius: var(--radius-sm);
+      text-transform: uppercase;
     }}
-    .node-status {{
-      font-size: 9px;
-      font-weight: 800;
-      font-family: var(--font-mono);
-      padding: 2px 6px;
-      border-radius: 4px;
+    .badge-fail {{
+      background: var(--status-fail-bg);
+      color: var(--status-fail-text);
+      border: 1px solid var(--status-fail-border);
     }}
-    .status-pass {{ background: var(--success-bg); color: var(--success-main); }}
-    .status-fail {{ background: var(--danger-bg); color: var(--danger-main); }}
-    .status-warn {{ background: var(--warning-bg); color: var(--warning-main); }}
-    .status-neutral {{ background: rgba(148, 163, 184, 0.1); color: var(--text-muted); }}
+    .badge-warn {{
+      background: var(--status-warn-bg);
+      color: var(--status-warn-text);
+      border: 1px solid var(--status-warn-border);
+    }}
+    .badge-pass {{
+      background: var(--status-pass-bg);
+      color: var(--status-pass-text);
+      border: 1px solid var(--status-pass-border);
+    }}
+    .badge-neutral {{
+      background: var(--status-neutral-bg);
+      color: var(--status-neutral-text);
+      border: 1px solid var(--status-neutral-border);
+    }}
 
-    .node-title {{
-      font-size: 13px;
+    /* 4-Stage Waterfall Lanes */
+    .waterfall-lanes {{
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      border-bottom: 1px solid var(--border-default);
+    }}
+    @media (max-width: 1000px) {{
+      .waterfall-lanes {{ grid-template-columns: 1fr; }}
+    }}
+    .waterfall-box {{
+      padding: 14px 16px;
+      border-right: 1px solid var(--border-muted);
+      background: var(--bg-panel);
+      display: flex;
+      flex-direction: column;
+    }}
+    .waterfall-box:last-child {{ border-right: none; }}
+    .waterfall-box.lane-defect {{
+      background: rgba(248, 81, 73, 0.04);
+      border-top: 2px solid var(--status-fail-text);
+    }}
+    .waterfall-box.lane-warning {{
+      background: rgba(210, 153, 34, 0.04);
+      border-top: 2px solid var(--status-warn-text);
+    }}
+    .waterfall-box.lane-healthy {{
+      border-top: 2px solid var(--status-pass-text);
+    }}
+
+    .box-header {{
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }}
+    .box-num {{
+      font-family: var(--font-mono);
+      font-size: 10px;
+      color: var(--text-muted);
       font-weight: 700;
-      color: var(--text-primary);
+    }}
+    .box-title {{
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--text-bright);
       margin-bottom: 6px;
     }}
-    .node-body {{
+    .box-body {{
       font-size: 11px;
       color: var(--text-secondary);
       flex-grow: 1;
@@ -456,149 +355,143 @@ def generate_html_report(
     }}
 
     /* Cutoff Visualizer */
-    .cutoff-diagram {{
-      background: rgba(0, 0, 0, 0.4);
-      border: 1px solid var(--border-subtle);
-      border-radius: var(--radius-sm);
-      padding: 6px 8px;
+    .cutoff-list {{
       display: flex;
       flex-direction: column;
-      gap: 4px;
+      gap: 3px;
+      background: var(--bg-canvas);
+      border: 1px solid var(--border-muted);
+      border-radius: var(--radius-sm);
+      padding: 6px;
       margin-top: 4px;
     }}
-    .cutoff-item {{
-      font-size: 10px;
+    .cutoff-chunk {{
       font-family: var(--font-mono);
-      padding: 3px 6px;
-      border-radius: 4px;
+      font-size: 9px;
+      padding: 2px 5px;
+      border-radius: var(--radius-sm);
       display: flex;
       justify-content: space-between;
     }}
-    .in-prompt {{
-      background: rgba(16, 185, 129, 0.12);
-      border: 1px solid rgba(16, 185, 129, 0.25);
-      color: #A7F3D0;
+    .chunk-admitted {{
+      background: rgba(63, 185, 80, 0.1);
+      color: #3FB950;
+      border: 1px solid rgba(63, 185, 80, 0.2);
     }}
-    .cutoff-divider {{
-      border-top: 1px dashed var(--warning-main);
+    .cutoff-line {{
+      border-top: 1px dashed #D29922;
       margin: 4px 0;
       text-align: center;
       position: relative;
     }}
-    .cutoff-label {{
+    .cutoff-line-label {{
       font-size: 8px;
-      font-weight: 800;
-      color: var(--warning-main);
-      background: #0E131F;
+      font-weight: 700;
+      font-family: var(--font-mono);
+      color: #D29922;
+      background: var(--bg-canvas);
       padding: 0 4px;
       position: relative;
       top: -6px;
     }}
-    .dropped-candidate {{
-      background: rgba(244, 63, 94, 0.1);
-      border: 1px solid rgba(244, 63, 94, 0.2);
-      color: #FDA4AF;
+    .chunk-pruned {{
+      background: rgba(248, 81, 73, 0.08);
+      color: #F85149;
+      border: 1px solid rgba(248, 81, 73, 0.18);
     }}
 
-    /* Case Details & Actionable Ticket */
-    .case-details {{
-      padding: 22px 26px;
+    /* Bottom Split */
+    .card-bottom {{
+      padding: 16px 20px;
       display: grid;
       grid-template-columns: 1fr 1fr;
       gap: 20px;
     }}
     @media (max-width: 860px) {{
-      .case-details {{ grid-template-columns: 1fr; }}
+      .card-bottom {{ grid-template-columns: 1fr; }}
     }}
 
-    .evidence-box {{
-      background: rgba(20, 27, 45, 0.4);
-      border: 1px solid var(--border-subtle);
+    .evidence-block {{
+      background: var(--bg-subtle);
+      border: 1px solid var(--border-muted);
       border-radius: var(--radius-md);
-      padding: 16px;
+      padding: 14px;
     }}
-    .evidence-title {{
-      font-size: 11px;
-      font-weight: 800;
-      color: var(--text-primary);
+    .block-heading {{
+      font-size: 10px;
+      font-weight: 700;
+      color: var(--text-muted);
       text-transform: uppercase;
       letter-spacing: 0.05em;
-      margin-bottom: 12px;
-      display: flex;
-      align-items: center;
-      gap: 6px;
+      margin-bottom: 10px;
     }}
-    .evidence-list {{
-      list-style-type: none;
+    .evidence-ul {{
+      list-style: none;
       display: flex;
       flex-direction: column;
-      gap: 8px;
+      gap: 6px;
     }}
-    .evidence-list li {{
+    .evidence-ul li {{
       font-size: 12px;
       color: var(--text-primary);
-      padding-left: 20px;
+      padding-left: 14px;
       position: relative;
       line-height: 1.5;
     }}
-    .evidence-list li::before {{
+    .evidence-ul li::before {{
       content: "•";
       position: absolute;
-      left: 6px;
-      color: #6366F1;
+      left: 2px;
+      color: #58A6FF;
       font-weight: bold;
     }}
 
-    .ticket-box {{
-      background: linear-gradient(180deg, rgba(30, 41, 67, 0.5) 0%, rgba(15, 23, 42, 0.8) 100%);
-      border: 1px solid rgba(99, 102, 241, 0.35);
+    .runbook-block {{
+      background: var(--bg-subtle);
+      border: 1px solid var(--border-muted);
+      border-left: 3px solid #58A6FF;
       border-radius: var(--radius-md);
-      padding: 18px;
+      padding: 14px;
       display: flex;
       flex-direction: column;
       justify-content: space-between;
     }}
-    .ticket-header {{
+    .runbook-header {{
       display: flex;
       justify-content: space-between;
-      align-items: center;
-      margin-bottom: 10px;
-    }}
-    .ticket-chip {{
       font-size: 10px;
-      font-weight: 800;
       font-family: var(--font-mono);
-      background: rgba(99, 102, 241, 0.2);
-      border: 1px solid rgba(99, 102, 241, 0.4);
-      color: #A5B4FC;
-      padding: 2px 7px;
-      border-radius: 4px;
-      text-transform: uppercase;
+      margin-bottom: 8px;
     }}
-    .ticket-body {{
+    .runbook-team {{
+      color: #58A6FF;
+      font-weight: 700;
+    }}
+    .runbook-text {{
       font-size: 12px;
-      color: #E2E8F0;
+      color: var(--text-bright);
       line-height: 1.5;
-      margin-bottom: 12px;
+      margin-bottom: 10px;
     }}
     .limitation-text {{
       font-size: 11px;
       color: var(--text-muted);
-      border-top: 1px solid rgba(255, 255, 255, 0.08);
-      padding-top: 10px;
+      border-top: 1px solid var(--border-muted);
+      padding-top: 8px;
       font-style: italic;
     }}
 
     .footer {{
       margin-top: 36px;
       text-align: center;
-      font-size: 12px;
+      font-size: 11px;
+      font-family: var(--font-mono);
       color: var(--text-muted);
     }}
 
     @media print {{
       body {{ background: #fff; color: #000; padding: 0; }}
-      .header, .case-card, .kpi-card {{ box-shadow: none; border-color: #ccc; background: #fff; color: #000; }}
+      .app-header, .trace-card, .kpi-block {{ box-shadow: none; border-color: #ccc; background: #fff; color: #000; }}
       .toolbar, .print-btn {{ display: none; }}
     }}
   </style>
@@ -607,55 +500,48 @@ def generate_html_report(
   <div class="container">
 
     <!-- Top Header -->
-    <header class="header">
-      <div class="brand-title">
-        <span class="brand-badge">Audit Observatory</span>
-        <div>
-          <h1>{_escape(title)}</h1>
-          <p style="font-size: 12px; color: var(--text-muted); margin-top: 2px;">
-            Deterministic Forensic Root-Cause Analysis for Retrieval-Augmented Generation
-          </p>
-        </div>
+    <header class="app-header">
+      <div class="header-brand">
+        <h1>{_escape(title)}</h1>
+        <span class="logo-badge">RAGmortem v0.2.0.dev0</span>
       </div>
       <div class="header-meta">
-        <div><strong>Generated:</strong> {now_str}</div>
-        <div><strong>Engine:</strong> RAGmortem v0.2.0.dev0</div>
-        <button class="print-btn" onclick="window.print()">🖨️ Export PDF / Print</button>
+        <div>Generated: {now_str}</div>
+        <button class="print-btn" onclick="window.print()">Print / Export Document</button>
       </div>
     </header>
 
     {"<!-- Demo Warning Banner -->" if is_demo else ""}
     {f'''<div class="demo-notice">
-      <span>ℹ️</span>
-      <div><strong>Synthetic Demonstration Data:</strong> The cases evaluated in this audit report are bundled benchmark failure scenarios for demonstration and validation.</div>
+      <span>Synthetic Demonstration Data:</span> The traces evaluated in this document are bundled benchmark failure scenarios for validation.
     </div>''' if is_demo else ""}
 
-    <!-- Executive KPI Summary Cards -->
-    <section class="kpi-grid">
-      <div class="kpi-card">
+    <!-- KPI Summary Row -->
+    <section class="kpi-row">
+      <div class="kpi-block">
         <div class="kpi-label">Total Traces Audited</div>
-        <div class="kpi-value">{total_cases}</div>
-        <div class="kpi-subtext">Resolved: {total_cases - unknown_count} | Inconclusive: {unknown_count}</div>
+        <div class="kpi-val">{total_cases}</div>
+        <div class="kpi-meta">Resolved: {total_cases - unknown_count} | Inconclusive: {unknown_count}</div>
       </div>
-      <div class="kpi-card kpi-gen">
+      <div class="kpi-block" style="border-top: 2px solid var(--status-fail-text);">
         <div class="kpi-label">Generation Failures</div>
-        <div class="kpi-value" style="color: #FDA4AF;">{gen_count}</div>
-        <div class="kpi-subtext">Triage: Prompt Engineering Team</div>
+        <div class="kpi-val" style="color: var(--status-fail-text);">{gen_count}</div>
+        <div class="kpi-meta">Target: Prompt Engineering Team</div>
       </div>
-      <div class="kpi-card kpi-rank">
+      <div class="kpi-block" style="border-top: 2px solid var(--status-warn-text);">
         <div class="kpi-label">Ranking Cutoff Failures</div>
-        <div class="kpi-value" style="color: #FDE68A;">{rank_count}</div>
-        <div class="kpi-subtext">Triage: Re-Ranker / Context Window</div>
+        <div class="kpi-val" style="color: var(--status-warn-text);">{rank_count}</div>
+        <div class="kpi-meta">Target: Re-Ranker / Context Window</div>
       </div>
-      <div class="kpi-card kpi-ok">
+      <div class="kpi-block" style="border-top: 2px solid var(--status-pass-text);">
         <div class="kpi-label">Healthy / Correct Abstain</div>
-        <div class="kpi-value" style="color: #A7F3D0;">{abstain_count}</div>
-        <div class="kpi-subtext">No system defect detected</div>
+        <div class="kpi-val" style="color: var(--status-pass-text);">{abstain_count}</div>
+        <div class="kpi-meta">No system defect detected</div>
       </div>
-      <div class="kpi-card kpi-unk">
+      <div class="kpi-block" style="border-top: 2px solid var(--border-emphasis);">
         <div class="kpi-label">UNKNOWN Attribution Rate</div>
-        <div class="kpi-value">{unknown_rate}%</div>
-        <div class="kpi-subtext">Strict honesty bounds applied</div>
+        <div class="kpi-val">{unknown_rate}%</div>
+        <div class="kpi-meta">Strict honesty bounds applied</div>
       </div>
     </section>
 
@@ -668,8 +554,8 @@ def generate_html_report(
         <button class="filter-tab" onclick="filterCases('healthy', this)">Healthy ({abstain_count})</button>
         <button class="filter-tab" onclick="filterCases('unknown', this)">Unknown ({unknown_count})</button>
       </div>
-      <div style="font-size: 12px; color: var(--text-muted); font-family: var(--font-mono);">
-        Forensic Pipeline Breakdown Active
+      <div style="font-size: 11px; color: var(--text-muted); font-family: var(--font-mono);">
+        Deterministic Forensic 4-Stage RAG Pipeline Breakdown
       </div>
     </div>
 
@@ -690,7 +576,7 @@ def generate_html_report(
       document.querySelectorAll('.filter-tab').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
 
-      document.querySelectorAll('.case-card').forEach(card => {{
+      document.querySelectorAll('.trace-card').forEach(card => {{
         const cat = card.getAttribute('data-category');
         if (category === 'all' || cat === category) {{
           card.style.display = 'block';
@@ -706,7 +592,7 @@ def generate_html_report(
 
 
 def _render_case_card(case: dict[str, Any], idx: int) -> str:
-    """Render a single case card with 4-stage pipeline visualization."""
+    """Render a single trace card with 4-stage waterfall visualization."""
     case_id = _escape(case.get("id", f"case_{idx}"))
     diag = str(case.get("diagnosis", "unknown")).lower()
     diag_english = _escape(case.get("diagnosis_english", diag))
@@ -719,164 +605,142 @@ def _render_case_card(case: dict[str, Any], idx: int) -> str:
     question = _escape(case.get("question", ""))
     answer = _escape(case.get("answer", ""))
 
-    # Determine category, badge styling, and pipeline breakpoints
-    breakpoint_html = ""
-    team_chip = "Investigation Team"
-    s1_class = "flow-node passed"
-    s2_class = "flow-node passed"
-    s3_class = "flow-node passed"
-    s4_class = "flow-node passed"
-    s2_stat = '<span class="node-status status-pass">PASS</span>'
-    s3_stat = '<span class="node-status status-pass">PASS</span>'
-    s4_stat = '<span class="node-status status-pass">PASS</span>'
+    team_id = "TRIAGE_TEAM"
+    s1_class = "waterfall-box lane-healthy"
+    s2_class = "waterfall-box"
+    s3_class = "waterfall-box"
+    s4_class = "waterfall-box"
+    s2_stat = '<span class="badge badge-pass">PASS</span>'
+    s3_stat = '<span class="badge badge-pass">PASS</span>'
+    s4_stat = '<span class="badge badge-pass">PASS</span>'
 
     if "generation" in diag:
         category = "generation"
-        badge_class = "badge-gen"
-        badge_icon = "🔴"
-        team_chip = "Prompt Engineering Team"
-        s4_class = "flow-node breakpoint-alert"
-        s4_stat = '<span class="node-status status-fail">FAIL</span>'
-        breakpoint_html = '<div class="breakpoint-pill">🚨 BREAKPOINT: HALLUCINATION</div>'
+        badge_class = "badge-fail"
+        team_id = "PROMPT_ENGINEERING"
+        s4_class = "waterfall-box lane-defect"
+        s4_stat = '<span class="badge badge-fail">DEFECT</span>'
     elif "ranking" in diag:
         category = "ranking"
-        badge_class = "badge-rank"
-        badge_icon = "🟠"
-        team_chip = "Re-Ranker & Indexing Team"
-        s3_class = "flow-node breakpoint-warning"
-        s3_stat = '<span class="node-status status-warn">CUTOFF</span>'
-        breakpoint_html = '<div class="breakpoint-pill warning-pill">⚠️ BREAKPOINT: TOP-K CUTOFF</div>'
+        badge_class = "badge-warn"
+        team_id = "RE_RANKER_CONFIG"
+        s3_class = "waterfall-box lane-warning"
+        s3_stat = '<span class="badge badge-warn">CUTOFF</span>'
     elif "retrieval" in diag:
         category = "retrieval"
-        badge_class = "badge-ret"
-        badge_icon = "🟣"
-        team_chip = "Search & Embeddings Team"
-        s2_class = "flow-node breakpoint-alert"
-        s2_stat = '<span class="node-status status-fail">MISS</span>'
-        breakpoint_html = '<div class="breakpoint-pill">🚨 BREAKPOINT: RETRIEVAL MISS</div>'
+        badge_class = "badge-fail"
+        team_id = "SEARCH_EMBEDDINGS"
+        s2_class = "waterfall-box lane-defect"
+        s2_stat = '<span class="badge badge-fail">MISS</span>'
     elif "no_failure" in diag or "abstain" in diag:
         category = "healthy"
-        badge_class = "badge-ok"
-        badge_icon = "🟢"
-        team_chip = "Quality & Telemetry Monitoring"
+        badge_class = "badge-pass"
+        team_id = "SYSTEM_HEALTHY"
     else:
         category = "unknown"
-        badge_class = "badge-unk"
-        badge_icon = "⚪"
-        team_chip = "Telemetry Instrumentation"
-        s2_class = "flow-node"
-        s3_class = "flow-node"
-        s4_class = "flow-node"
-        s2_stat = '<span class="node-status status-neutral">UNKNOWN</span>'
-        s3_stat = '<span class="node-status status-neutral">UNKNOWN</span>'
-        s4_stat = '<span class="node-status status-neutral">UNKNOWN</span>'
+        badge_class = "badge-neutral"
+        team_id = "TELEMETRY_LOGGING"
+        s2_stat = '<span class="badge badge-neutral">UNKNOWN</span>'
+        s3_stat = '<span class="badge badge-neutral">UNKNOWN</span>'
+        s4_stat = '<span class="badge badge-neutral">UNKNOWN</span>'
 
     evidence_html = "".join(f"<li>{_escape(ev)}</li>" for ev in evidence)
 
     return f"""
-      <article class="case-card" data-category="{category}">
-        <div class="case-header">
+      <article class="trace-card" data-category="{category}">
+        <div class="card-top">
           <div style="display:flex; align-items:center; gap:12px;">
-            <span class="case-id">{case_id}</span>
-            <span class="verdict-badge {badge_class}">{badge_icon} {diag_english}</span>
+            <span class="card-id">{case_id}</span>
+            <span class="badge {badge_class}">{diag_english}</span>
           </div>
-          <div style="display:flex; align-items:center; gap:14px; font-size:12px;">
-            <span>Confidence: <strong style="font-family:var(--font-mono); color:#fff;">{conf_pct}%</strong></span>
-            <span style="font-size:11px; color:var(--text-muted);">({mode})</span>
-          </div>
-        </div>
-
-        <!-- 4-Stage Forensic Pipeline -->
-        <div class="pipeline-section">
-          <div class="pipeline-title">
-            <span>Forensic 4-Stage RAG Pipeline Breakdown</span>
-            <span>Where it succeeded vs where it broke</span>
-          </div>
-          <div class="flow-grid">
-            
-            <!-- Stage 1 -->
-            <div class="{s1_class}">
-              <div class="node-header">
-                <span class="node-number">01 / INPUT</span>
-                <span class="node-status status-pass">OK</span>
-              </div>
-              <div class="node-title">Stage 1: User Query</div>
-              <div class="node-body">
-                <p style="font-weight:600; color:#fff; font-size:12px;">"{question}"</p>
-                <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">
-                  Token Budget: {len(question.split())} tokens
-                </div>
-              </div>
-            </div>
-
-            <!-- Stage 2 -->
-            <div class="{s2_class}">
-              {"<!-- Breakpoint -->" + breakpoint_html if "retrieval" in diag else ""}
-              <div class="node-header">
-                <span class="node-number">02 / RETRIEVAL</span>
-                {s2_stat}
-              </div>
-              <div class="node-title">Vector Retrieval</div>
-              <div class="node-body">
-                <span style="font-size:11px; color:var(--text-muted);">Dense bi-encoder scoring candidate chunks against threshold bounds (0.47 / 0.50 / 0.53).</span>
-              </div>
-            </div>
-
-            <!-- Stage 3 -->
-            <div class="{s3_class}">
-              {"<!-- Breakpoint -->" + breakpoint_html if "ranking" in diag else ""}
-              <div class="node-header">
-                <span class="node-number">03 / RANKING</span>
-                {s3_stat}
-              </div>
-              <div class="node-title">Top-K Context Window</div>
-              <div class="node-body">
-                <div class="cutoff-diagram">
-                  <div class="cutoff-item in-prompt">
-                    <span>Rank #1 - #2</span>
-                    <span>IN PROMPT</span>
-                  </div>
-                  <div class="cutoff-divider">
-                    <span class="cutoff-label">✂️ PROMPT WINDOW CUTOFF</span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <!-- Stage 4 -->
-            <div class="{s4_class}">
-              {"<!-- Breakpoint -->" + breakpoint_html if "generation" in diag else ""}
-              <div class="node-header">
-                <span class="node-number">04 / GENERATION</span>
-                {s4_stat}
-              </div>
-              <div class="node-title">LLM Fact Grounding</div>
-              <div class="node-body">
-                <p style="font-size:10px; color:var(--text-muted);">Model Output:</p>
-                <p style="font-weight:600; color:#fff; font-size:11px;">"{answer}"</p>
-              </div>
-            </div>
-
+          <div style="display:flex; align-items:center; gap:14px; font-size:11px; font-family:var(--font-mono);">
+            <span>CONFIDENCE: <strong style="color:var(--text-bright);">{conf_pct}%</strong></span>
+            <span style="color:var(--text-muted);">({mode})</span>
           </div>
         </div>
 
-        <!-- Forensic Evidence & Actionable Ticket -->
-        <div class="case-details">
-          <div class="evidence-box">
-            <div class="evidence-title">🔍 Forensic Evidence Points</div>
-            <ul class="evidence-list">
+        <!-- 4-Stage Waterfall Breakdown -->
+        <div class="waterfall-lanes">
+          
+          <!-- Stage 1 -->
+          <div class="{s1_class}">
+            <div class="box-header">
+              <span class="box-num">SPAN 01</span>
+              <span class="badge badge-pass">VALID</span>
+            </div>
+            <div class="box-title">Stage 1: User Query</div>
+            <div class="box-body">
+              <p style="font-size:11px; color:var(--text-bright); font-weight:500;">"{question}"</p>
+              <div style="font-size:10px; color:var(--text-muted); margin-top:4px;">
+                Input length: {len(question.split())} words
+              </div>
+            </div>
+          </div>
+
+          <!-- Stage 2 -->
+          <div class="{s2_class}">
+            <div class="box-header">
+              <span class="box-num">SPAN 02</span>
+              {s2_stat}
+            </div>
+            <div class="box-title">Vector Search (Bi-Encoder)</div>
+            <div class="box-body">
+              <span style="font-size:11px; color:var(--text-muted);">Bi-encoder scoring candidate chunks against calibrated threshold bounds (0.47 / 0.50 / 0.53).</span>
+            </div>
+          </div>
+
+          <!-- Stage 3 -->
+          <div class="{s3_class}">
+            <div class="box-header">
+              <span class="box-num">SPAN 03</span>
+              {s3_stat}
+            </div>
+            <div class="box-title">Top-K Context Cutoff</div>
+            <div class="box-body">
+              <div class="cutoff-list">
+                <div class="cutoff-chunk chunk-admitted">
+                  <span>Rank #1 - #2</span>
+                  <span>IN PROMPT</span>
+                </div>
+                <div class="cutoff-line">
+                  <span class="cutoff-line-label">TOP-K CUTOFF</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Stage 4 -->
+          <div class="{s4_class}">
+            <div class="box-header">
+              <span class="box-num">SPAN 04</span>
+              {s4_stat}
+            </div>
+            <div class="box-title">LLM Fact Grounding</div>
+            <div class="box-body">
+              <div style="font-size:10px; color:var(--text-muted);">Model Output:</div>
+              <div style="font-family:var(--font-mono); font-size:11px; color:var(--text-bright);">"{answer}"</div>
+            </div>
+          </div>
+
+        </div>
+
+        <!-- Bottom Detail Split -->
+        <div class="card-bottom">
+          <div class="evidence-block">
+            <div class="block-heading">Diagnostic Evidence Trail</div>
+            <ul class="evidence-ul">
               {evidence_html}
             </ul>
           </div>
 
-          <div class="ticket-box">
+          <div class="runbook-block">
             <div>
-              <div class="ticket-header">
-                <span class="ticket-chip">{team_chip}</span>
-                <span style="font-size:10px; color:var(--text-muted); font-family:var(--font-mono);">Severity: High</span>
+              <div class="runbook-header">
+                <span class="runbook-team">{team_id}</span>
+                <span style="color:var(--text-muted);">SEVERITY: HIGH</span>
               </div>
-              <div class="ticket-body">
-                <strong>Remediation:</strong> {next_check}
+              <div class="runbook-text">
+                {next_check}
               </div>
             </div>
             <div class="limitation-text">
