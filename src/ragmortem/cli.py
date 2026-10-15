@@ -257,9 +257,6 @@ def execute_diagnose_cases(
         payload["cases"] = results
         payload["summary"] = summary_data
         output_str = json.dumps(payload, indent=2)
-    elif fmt == "html":
-        from ragmortem.report_html import generate_html_report
-        output_str = generate_html_report(results, summary_data, is_demo=is_demo)
     elif fmt == "md":
         lines = [
             "# RAGmortem Diagnostic Report",
@@ -444,10 +441,6 @@ def cmd_diagnose(args: argparse.Namespace) -> int:
     )
 
 
-def cmd_web(args: argparse.Namespace) -> int:
-    """Launch interactive executive web showcase dashboard."""
-    from ragmortem.server import run_server
-    return run_server(port=args.port, open_browser=not args.no_browser)
 
 
 # ---------------------------------------------------------------------------
@@ -630,31 +623,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     demo_p.add_argument(
         "--format",
-        choices=["text", "json", "md", "html"],
+        choices=["text", "json", "md"],
         default="text",
-        help="Output format: text (default), json, md, or html",
+        help="Output format: text (default), json, or md",
     )
     demo_p.add_argument(
         "--out",
         default=None,
         help="Optional file path to write output to.",
-    )
-
-    # web
-    web_p = subparsers.add_parser(
-        "web",
-        help="Launch interactive executive web showcase dashboard.",
-    )
-    web_p.add_argument(
-        "--port",
-        type=int,
-        default=8080,
-        help="Port to serve dashboard on (default: 8080).",
-    )
-    web_p.add_argument(
-        "--no-browser",
-        action="store_true",
-        help="Do not open browser automatically.",
     )
 
     # schema
@@ -691,9 +667,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     diag_p.add_argument(
         "--format",
-        choices=["text", "json", "md", "html"],
+        choices=["text", "json", "md"],
         default="text",
-        help="Output format: text (default), json, md, or html",
+        help="Output format: text (default), json, or md",
     )
     diag_p.add_argument(
         "--out",
@@ -763,8 +739,6 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     if args.command == "demo":
         return cmd_demo(args)
-    elif args.command == "web":
-        return cmd_web(args)
     elif args.command == "schema":
         return cmd_schema(args)
     elif args.command == "diagnose":

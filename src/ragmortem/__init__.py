@@ -14,9 +14,6 @@ from ragmortem.retrieval import (
     parse_chunks_from_markdown,
 )
 
-from ragmortem.report_html import generate_html_report
-from ragmortem.server import run_server
-
 __all__ = [
     "diagnose",
     "trace",
@@ -29,7 +26,5 @@ __all__ = [
     "CorpusRetriever",
     "load_corpus_from_directory",
     "parse_chunks_from_markdown",
-    "generate_html_report",
-    "run_server",
     "__version__",
 ]
