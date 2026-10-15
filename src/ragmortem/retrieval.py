@@ -11,6 +11,7 @@ so that corpus-aware diagnosis works from any external installation.
 
 from __future__ import annotations
 
+import functools
 import re
 from pathlib import Path
 from typing import Any, Sequence
@@ -18,6 +19,15 @@ from typing import Any, Sequence
 from ragmortem.types import Chunk
 
 DEFAULT_EMBEDDING_MODEL = "all-MiniLM-L6-v2"
+DEFAULT_TOP_K = 3
+
+
+@functools.lru_cache(maxsize=4)
+def get_sentence_transformer(model_name: str = DEFAULT_EMBEDDING_MODEL) -> Any:
+    """Load and memoize a SentenceTransformer model instance across the process."""
+    from sentence_transformers import SentenceTransformer
+    return SentenceTransformer(model_name)
+
 
 
 # ---------------------------------------------------------------------------
@@ -173,7 +183,7 @@ class CorpusRetriever:
         self._embeddings: Any = None
 
         if self.chunks:
-            self._embedding_model = SentenceTransformer(embedding_model_name)
+            self._embedding_model = get_sentence_transformer(embedding_model_name)
             texts = [c.text for c in self.chunks]
             self._embeddings = self._embedding_model.encode(
                 texts, normalize_embeddings=True, show_progress_bar=False

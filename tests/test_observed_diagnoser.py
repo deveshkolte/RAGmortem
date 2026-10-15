@@ -34,10 +34,14 @@ def sample_corpus() -> list[Chunk]:
     ]
 
 
+@pytest.fixture(scope="session")
+def shared_app() -> ReferenceRagApp:
+    return ReferenceRagApp(mock_mode=True)
+
+
 @pytest.fixture
-def diagnoser(sample_corpus: list[Chunk]) -> RAGDiagnoser:
-    app = ReferenceRagApp(mock_mode=True)
-    return RAGDiagnoser(app=app, corpus_chunks=sample_corpus)
+def diagnoser(sample_corpus: list[Chunk], shared_app: ReferenceRagApp) -> RAGDiagnoser:
+    return RAGDiagnoser(app=shared_app, corpus_chunks=sample_corpus)
 
 
 def test_observed_execution_cannot_access_gold_labels() -> None:

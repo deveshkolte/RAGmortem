@@ -268,7 +268,13 @@ def render_cutoff_list(cutoff_info: dict[str, Any]) -> Group | None:
     return Group(*items)
 
 
-def render_header(console: Console, *, is_demo: bool = False, version: str = "0.2.0") -> None:
+def render_header(
+    console: Console,
+    *,
+    is_demo: bool = False,
+    profile: str = "minilm",
+    version: str = "0.2.0",
+) -> None:
     """Print the primary RAGmortem header banner."""
     header_table = Table.grid(expand=True)
     header_table.add_column(justify="left", ratio=3)
@@ -281,6 +287,8 @@ def render_header(console: Console, *, is_demo: bool = False, version: str = "0.
     )
     badge_text = Text.assemble(
         ("v" + version, "bold #61afef on #152238"),
+        (" ", "default"),
+        (f"Profile: {profile}", "bold #d2a8ff on #2e1b4e"),
         (" ", "default"),
         ("LOCAL-FIRST CPU", "dim #98c379 on #12281b"),
     )
@@ -632,11 +640,12 @@ def render_rich_report(
     summary_data: dict[str, Any],
     *,
     is_demo: bool = False,
+    profile: str = "minilm",
     console: Console | None = None,
 ) -> None:
     """Print complete rich-formatted diagnostic run to console."""
     c = console or get_console()
-    render_header(c, is_demo=is_demo)
+    render_header(c, is_demo=is_demo, profile=profile)
 
     for idx, case_data in enumerate(results, start=1):
         render_case_card(c, idx, case_data)

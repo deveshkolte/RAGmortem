@@ -22,13 +22,13 @@ from ragmortem.taxonomy import FailureType
 from ragmortem.types import Chunk
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def shared_app() -> ReferenceRagApp:
     """Share single instance of ReferenceRagApp to avoid re-loading embeddings."""
     return ReferenceRagApp(mock_mode=True, top_k=3)
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="session")
 def corpus_chunks(shared_app: ReferenceRagApp) -> list[Chunk]:
     return shared_app.chunks
 

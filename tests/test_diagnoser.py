@@ -34,10 +34,14 @@ def mock_corpus() -> list[Chunk]:
     ]
 
 
+@pytest.fixture(scope="session")
+def shared_reference_app() -> ReferenceRagApp:
+    return ReferenceRagApp(mock_mode=True)
+
+
 @pytest.fixture
-def diagnoser(mock_corpus: list[Chunk]) -> RAGDiagnoser:
-    app = ReferenceRagApp(mock_mode=True)
-    return RAGDiagnoser(app=app, corpus_chunks=mock_corpus)
+def diagnoser(mock_corpus: list[Chunk], shared_reference_app: ReferenceRagApp) -> RAGDiagnoser:
+    return RAGDiagnoser(app=shared_reference_app, corpus_chunks=mock_corpus)
 
 
 def test_diagnose_retrieval_miss(diagnoser: RAGDiagnoser) -> None:

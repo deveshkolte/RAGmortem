@@ -6,8 +6,8 @@
 
 A debugger for RAG apps: it finds why an answer went wrong — retrieval, ranking, generation, or lack of evidence — and tests the diagnosis before you ship it.
 
-> **Project Status: Experimental open-source RAG debugger (v0.1)**  
-> RAGmortem is an experimental, deterministic root-cause failure diagnoser for RAG pipelines. It isolates failures across retrieval, ranking, generation, and abstention without requiring an external LLM judge.
+> **Project Status: Open-source RAG debugger (v0.2.0)**  
+> RAGmortem is a fast, deterministic root-cause failure diagnoser for RAG pipelines. It isolates failures across retrieval, ranking, generation, and abstention without requiring an external LLM judge.
 
 ```python
 from ragmortem import diagnose, Chunk
@@ -139,6 +139,9 @@ Run the bundled demonstration on 5 synthetic failure cases with the screenshot-w
 ragmortem demo
 # or instant zero-install:
 uvx ragmortem demo
+
+# Switch embedding calibration profile (minilm, openai, bge, relative)
+ragmortem demo --profile relative
 ```
 
 View input trace schema with interactive Rich syntax highlighting:
@@ -151,10 +154,16 @@ Diagnose your own execution traces:
 # Trace-only diagnosis with screenshot-worthy Rich terminal UI
 ragmortem diagnose trace.json
 
+# Calibrate to your embedding model distribution
+ragmortem diagnose trace.json --profile openai    # text-embedding-3-small/large
+ragmortem diagnose trace.json --profile bge       # bge-large-en-v1.5
+ragmortem diagnose trace.json --profile relative  # auto-calibrate to runtime score distribution
+
 # Corpus-aware diagnosis
 ragmortem diagnose traces.jsonl --corpus path/to/documents
 
-# Export report as structured JSON or clean Markdown
+# Export reports: HTML (dark-mode dashboard), structured JSON, or clean Markdown
+ragmortem diagnose trace.json --format html --out report.html
 ragmortem diagnose trace.json --format json --out report.json
 ragmortem diagnose trace.json --format md --out report.md
 ```
@@ -286,6 +295,36 @@ result = handler.diagnose()
 
 ---
 
+### Zero-Dependency Framework Adapters (`from_langchain` & `from_llamaindex`)
+
+If you don't use callbacks or prefer to convert existing run objects, convert framework outputs or run dictionaries directly into standardized `Trace` instances with zero hard dependencies (neither `langchain` nor `llama-index` needs to be installed):
+
+#### LangChain Adapter (`from_langchain`)
+```python
+from ragmortem import from_langchain, diagnose
+
+# Duck-types RetrievalQA output dicts, chain.invoke() runs, or Document objects
+run_output = chain.invoke({"query": "What is the P1 incident SLA?"})
+trace_obj = from_langchain(run_output)
+
+result = diagnose(trace_obj)
+print(result.to_text())
+```
+
+#### LlamaIndex Adapter (`from_llamaindex`)
+```python
+from ragmortem import from_llamaindex, diagnose
+
+# Duck-types Response / NodeWithScore objects or query engine output dicts
+response = query_engine.query("What is the P1 incident SLA?")
+trace_obj = from_llamaindex(response)
+
+result = diagnose(trace_obj)
+print(result.to_text())
+```
+
+---
+
 ### OpenTelemetry, Phoenix & LangSmith Trace Importers
 
 Import traces directly from **Arize Phoenix**, **LangSmith**, or generic **OpenTelemetry** spans:
@@ -310,9 +349,29 @@ print(result.to_text())
 
 ---
 
-### `pytest-ragmortem`: Auto-Diagnosis in GitHub Actions CI
+### `pytest-ragmortem`: Auto-Diagnosis in CI & `ragmortem_assert`
 
-When a RAG assertion fails in CI, `pytest-ragmortem` intercepts the failure and outputs a root-cause diagnosis card with tailored remediation directly into your terminal and GitHub Actions summary:
+RAGmortem includes a built-in pytest plugin (`pytest-ragmortem`) that intercepts test failures and isolates component root causes automatically:
+
+#### 1. Explicit Assertion Helper (`ragmortem_assert`)
+Assert that a RAG execution succeeded without failure. If any failure is diagnosed (`RETRIEVAL_SUSPECTED`, `RANKING_SUSPECTED`, `GENERATION_SUSPECTED`, etc.), it formats and prints a Rich diagnostic card and raises an `AssertionError` with remediation recommendations:
+
+```python
+from ragmortem import ragmortem_assert
+
+def test_production_qa():
+    run_output = my_rag_app.query("What is the mandatory P1 response SLA?")
+    
+    # Diagnoses trace; if failure detected, raises AssertionError with Rich diagnostic card
+    ragmortem_assert(
+        trace_input=run_output,
+        reference_answer="15 minutes",
+        profile="minilm",  # or "openai", "bge", "relative"
+    )
+```
+
+#### 2. Automatic Diagnosis via `rag_trace` Fixture
+When an ordinary unit test assertion fails in CI, `rag_trace` automatically intercepts the test failure, isolates the root cause from execution telemetry, and outputs a formatted failure card:
 
 ```python
 # test_rag_pipeline.py
@@ -442,7 +501,7 @@ Run the full offline test suite:
 pytest tests/ -v
 ```
 
-All 124 tests run 100% offline on CPU without network requests or API keys.
+All 192 tests run 100% offline on CPU in ~10 seconds without network requests or API keys.
 
 ---
 

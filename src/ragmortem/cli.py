@@ -37,7 +37,7 @@ def get_what_this_cannot_tell_you(mode: str, limitations: list[str]) -> str:
     if "trace-only" in norm_mode:
         return "What this cannot tell you: Trace-only mode cannot verify if unretrieved documents exist in corpus or if answer is factually correct."
     elif "reference" in norm_mode:
-        return "What this cannot tell you: Reference matching is lexical; semantic equivalence or paraphrased answers are not verified."
+        return "What this cannot tell you: Reference matching used two-tier verification (deterministic lexical + semantic fallback); complex multi-hop reasoning or external factual drift is not verified."
     else:  # corpus-aware
         return "What this cannot tell you: Corpus-aware mode verifies retrieval quality, but cannot verify factual truthfulness without a reference answer."
 
@@ -341,12 +341,12 @@ def execute_diagnose_cases(
             from rich.console import Console
             file_buf = io.StringIO()
             file_console = Console(file=file_buf, force_terminal=False, width=100)
-            render_rich_report(results, summary_data, is_demo=is_demo, console=file_console)
+            render_rich_report(results, summary_data, is_demo=is_demo, console=file_console, profile=profile)
             out_path = Path(out)
             out_path.parent.mkdir(parents=True, exist_ok=True)
             out_path.write_text(file_buf.getvalue(), encoding="utf-8")
         else:
-            render_rich_report(results, summary_data, is_demo=is_demo)
+            render_rich_report(results, summary_data, is_demo=is_demo, profile=profile)
 
     return 0
 

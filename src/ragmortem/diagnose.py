@@ -99,8 +99,11 @@ class ObservedExecution:
             data.get("candidate_chunk_ids")
             or data.get("candidate_retrieved_ids")
             or data.get("candidate_chunks")
+            or data.get("candidates")
         )
         cand_ids: list[str] | None = None
+        extracted_cand_scores: list[float] = []
+        can_extract_cand_scores = True
         if raw_cand is not None:
             cand_ids = []
             for i, item in enumerate(raw_cand):
@@ -110,13 +113,24 @@ class ObservedExecution:
                     txt = item.get("text") or item.get("content")
                     if txt and cid not in chunk_texts:
                         chunk_texts[cid] = str(txt)
+                    if can_extract_cand_scores:
+                        s = item.get("score")
+                        if s is not None:
+                            try:
+                                extracted_cand_scores.append(float(s))
+                            except (ValueError, TypeError):
+                                can_extract_cand_scores = False
+                        else:
+                            can_extract_cand_scores = False
                 elif hasattr(item, "id"):
                     cid = str(item.id)
                     cand_ids.append(cid)
                     if hasattr(item, "text") and item.text and cid not in chunk_texts:
                         chunk_texts[cid] = str(item.text)
+                    can_extract_cand_scores = False
                 else:
                     cand_ids.append(str(item))
+                    can_extract_cand_scores = False
 
         # Scores
         if data.get("scores") is not None:
@@ -135,6 +149,8 @@ class ObservedExecution:
                 cand_scores = [float(s) for s in cand_scores]
             except (ValueError, TypeError):
                 cand_scores = None
+        elif can_extract_cand_scores and cand_ids and len(extracted_cand_scores) == len(cand_ids):
+            cand_scores = extracted_cand_scores
 
         if chunk_texts:
             clean_metadata["chunk_texts"] = chunk_texts
@@ -916,9 +932,14 @@ class RAGDiagnoser:
             use_corpus = (target_app is not None and hasattr(target_app, "retrieve"))
 
         if not use_corpus:
-            evidence.append(
-                f"Retriever returned low-relevance chunks (top score: {top_score:.3f} < {low_bound})."
-            )
+            if calib.is_relative:
+                evidence.append(
+                    f"Retriever returned low-relevance chunks (top score: {top_score:.3f} < {low_bound:.2f}, Z-score: {calib.relative_z_score:+.2f} [relative])."
+                )
+            else:
+                evidence.append(
+                    f"Retriever returned low-relevance chunks (top score: {top_score:.3f} < {low_bound:.2f} [{calib.model_profile}])."
+                )
             evidence.append(
                 "Trace-only mode: Without access to the corpus index, cannot determine whether retriever missed documents or question is unanswerable."
             )
@@ -1051,15 +1072,24 @@ class RAGDiagnoser:
 
         # 1. Answer verification (deterministic lexical + semantic fallback)
         from ragmortem.faults.eval import verify_answer
+        from ragmortem.nli import get_default_verifier
         ver_res = verify_answer(trace.generated_answer, reference_answer)
-        method_kind = "semantic" if "semantic" in ver_res.method else "lexical"
+        v = get_default_verifier()
+        has_semantic = v is not None and getattr(v, "enabled", True)
+        method_kind = "semantic" if "semantic" in ver_res.method else ("lexical" if ver_res.is_correct else "two_tier")
         signals["verification_method"] = method_kind
         limitations: list[str] = []
 
-        if method_kind == "semantic":
-            limitations.append("Reference matching used semantic verification; complex multi-hop reasoning or external factual drift is not verified.")
+        if ver_res.is_correct:
+            if "semantic" in ver_res.method:
+                limitations.append("Reference matching used semantic verification (cross-encoder/NLI); subtle domain nuances or multi-hop logical soundness are not verified.")
+            else:
+                limitations.append("Reference matching is lexical; semantic equivalence or paraphrased answers are not verified.")
         else:
-            limitations.append("Reference matching is lexical; semantic equivalence or paraphrased answers are not verified.")
+            if has_semantic:
+                limitations.append("Reference matching used two-tier verification (deterministic lexical + semantic fallback); complex multi-hop reasoning or external factual drift is not verified.")
+            else:
+                limitations.append("Reference matching is lexical; semantic equivalence or paraphrased answers are not verified.")
 
         if ver_res.is_correct:
             evidence.append(f"Generated answer satisfies expected reference answer ({method_kind}): '{trace.generated_answer}'.")

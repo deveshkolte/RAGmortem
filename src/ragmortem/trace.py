@@ -62,6 +62,8 @@ class Trace:
     def __post_init__(self) -> None:
         if self.scores is None:
             self.scores = self.get_scores()
+        if self.candidate_scores is None:
+            self.candidate_scores = self.get_candidate_scores()
         if not self.score_type:
             self.score_type = "similarity"
 
@@ -117,6 +119,31 @@ class Trace:
             return extracted
         return None
 
+    def get_candidate_scores(self) -> list[float] | None:
+        """Return candidate scores from self.candidate_scores or extract from candidate chunk dicts."""
+        if self.candidate_scores is not None:
+            try:
+                return [float(s) for s in self.candidate_scores]
+            except (ValueError, TypeError):
+                return None
+        if self.candidate_chunks:
+            extracted: list[float] = []
+            for c in self.candidate_chunks:
+                if isinstance(c, dict) and "score" in c and c["score"] is not None:
+                    try:
+                        extracted.append(float(c["score"]))
+                    except (ValueError, TypeError):
+                        return None
+                elif hasattr(c, "score") and getattr(c, "score") is not None:
+                    try:
+                        extracted.append(float(getattr(c, "score")))
+                    except (ValueError, TypeError):
+                        return None
+                else:
+                    return None
+            return extracted
+        return None
+
     def to_observed_execution(self) -> Any:
         """Convert trace to internal ObservedExecution structure for the diagnostic engine."""
         from ragmortem.diagnose import ObservedExecution
@@ -150,12 +177,7 @@ class Trace:
         if eff_top_k is None:
             eff_top_k = len(self.retrieved_chunks) if self.retrieved_chunks else 3
 
-        cand_scores = None
-        if self.candidate_scores:
-            try:
-                cand_scores = [float(s) for s in self.candidate_scores]
-            except (ValueError, TypeError):
-                cand_scores = None
+        cand_scores = self.get_candidate_scores()
 
         return ObservedExecution(
             question=self.query,

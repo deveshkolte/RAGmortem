@@ -17,9 +17,18 @@ import re
 import string
 from typing import Any, Protocol
 
+import functools
 logger = logging.getLogger("ragmortem.nli")
 
 DEFAULT_NLI_MODEL = "cross-encoder/nli-deberta-v3-mini"
+
+
+@functools.lru_cache(maxsize=4)
+def get_cross_encoder(model_name: str = DEFAULT_NLI_MODEL) -> Any:
+    """Load and memoize CrossEncoder instances across the process."""
+    from sentence_transformers import CrossEncoder
+    return CrossEncoder(model_name)
+
 
 
 def compute_ngram_cosine_similarity(text1: str, text2: str, n: int = 3) -> float:
@@ -113,10 +122,8 @@ class LocalNLIVerifier:
 
         self._load_attempted = True
         try:
-            from sentence_transformers import CrossEncoder
-
             logger.info("Loading local NLI CrossEncoder '%s'...", self.model_name)
-            self._model = CrossEncoder(self.model_name)
+            self._model = get_cross_encoder(self.model_name)
             return True
         except Exception as exc:
             logger.debug("Local NLI model '%s' unavailable: %s", self.model_name, exc)

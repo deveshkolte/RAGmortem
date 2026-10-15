@@ -10,6 +10,7 @@ import urllib.error
 from pathlib import Path
 
 import numpy as np
+from ragmortem.retrieval import get_sentence_transformer
 from sentence_transformers import SentenceTransformer
 
 from ragmortem.types import Chunk, RagResult
@@ -89,7 +90,7 @@ class ReferenceRagApp(RagAdapter):
 
         # Initialize local sentence embedding model
         self.embedding_model_name = embedding_model_name
-        self.embedding_model = SentenceTransformer(embedding_model_name)
+        self.embedding_model = get_sentence_transformer(embedding_model_name)
 
         # Precompute normalized embeddings for corpus
         if self.chunks:

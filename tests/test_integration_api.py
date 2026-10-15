@@ -15,7 +15,7 @@ from examples.reference_rag.app import ReferenceRagApp
 DOCS_DIR = Path(__file__).resolve().parent.parent / "examples" / "reference_rag" / "documents"
 
 
-@pytest.fixture
+@pytest.fixture(scope="session")
 def reference_app() -> ReferenceRagApp:
     return ReferenceRagApp(corpus_dir=DOCS_DIR, mock_mode=True, top_k=3)
 
