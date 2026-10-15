@@ -252,7 +252,89 @@ python examples/integrations/realistic_rag_demo.py
 
 ---
 
-## 6. CLI: Diagnosing Saved Traces
+## 6. Hijack Existing Workflows (The Growth Wedge)
+
+### 1-Line LangChain & LlamaIndex Callbacks
+
+Drop RAGmortem directly into your existing chain or query engine with one line of code:
+
+#### LangChain Callback
+```python
+from ragmortem import RAGmortemCallbackHandler
+
+handler = RAGmortemCallbackHandler(auto_diagnose=True)
+chain.invoke(
+    {"query": "What is the P1 incident SLA?"},
+    config={"callbacks": [handler]},
+)
+# Or manually inspect diagnosis:
+result = handler.diagnose()
+```
+
+#### LlamaIndex Callback
+```python
+from ragmortem import LlamaIndexRAGmortemHandler
+from llama_index.core.callbacks import CallbackManager
+from llama_index.core import Settings
+
+handler = LlamaIndexRAGmortemHandler(auto_diagnose=True)
+Settings.callback_manager = CallbackManager([handler])
+
+response = query_engine.query("What is the P1 incident SLA?")
+result = handler.diagnose()
+```
+
+---
+
+### OpenTelemetry, Phoenix & LangSmith Trace Importers
+
+Import traces directly from **Arize Phoenix**, **LangSmith**, or generic **OpenTelemetry** spans:
+
+```bash
+# Auto-detects schema and diagnoses directly
+ragmortem diagnose phoenix_spans.json
+ragmortem diagnose langsmith_run.json
+
+# Or import into standardized RAGmortem trace format:
+ragmortem import phoenix_spans.json --out trace.json --diagnose
+```
+
+In Python:
+```python
+from ragmortem import import_trace, diagnose
+
+trace_obj = import_trace("path/to/otel_spans.json")
+result = diagnose(trace_obj)
+print(result.to_text())
+```
+
+---
+
+### `pytest-ragmortem`: Auto-Diagnosis in GitHub Actions CI
+
+When a RAG assertion fails in CI, `pytest-ragmortem` intercepts the failure and outputs a root-cause diagnosis card with tailored remediation directly into your terminal and GitHub Actions summary:
+
+```python
+# test_rag_pipeline.py
+def test_p1_sla(rag_trace):
+    res = rag_app.query("What is the P1 response time?")
+    rag_trace.record(
+        query="What is the P1 response time?",
+        retrieved_chunks=res.retrieved_chunks,
+        scores=res.scores,
+        answer=res.answer,
+    )
+    # If this assertion fails, pytest-ragmortem automatically prints the root-cause diagnosis!
+    assert "15 minutes" in res.answer
+```
+
+In **GitHub Actions**, `pytest-ragmortem` automatically:
+1. Emits inline workflow annotations (`::error file=...,title=RAGmortem Diagnosis [GENERATION_SUSPECTED]...`)
+2. Generates an executive diagnostic table in `$GITHUB_STEP_SUMMARY`.
+
+---
+
+## 7. CLI: Diagnosing Saved Traces
 
 Diagnose saved JSON trace files from the terminal:
 
@@ -293,7 +375,7 @@ ragmortem diagnose-trace trace.json --corpus path/to/documents --json
 
 ---
 
-## 7. Failure Taxonomy
+## 8. Failure Taxonomy
 
 | Failure Mode | Canonical Type | What Happened | Recommended Next Step |
 | :--- | :--- | :--- | :--- |
@@ -312,7 +394,7 @@ ragmortem diagnose-trace trace.json --corpus path/to/documents --json
 
 ---
 
-## 8. Validation Benchmarks & Historical Evidence
+## 9. Validation Benchmarks & Historical Evidence
 
 To ensure scientific credibility, RAGmortem distinguishes strictly between **controlled benchmarks**, **adversarial holdouts**, and **integration smoke tests**.
 
@@ -328,7 +410,7 @@ To ensure scientific credibility, RAGmortem distinguishes strictly between **con
 
 ---
 
-## 9. What Each Mode Can Truthfully Claim
+## 10. What Each Mode Can Truthfully Claim
 
 | Diagnostic Mode | What It Can Truthfully Claim | What It Cannot Claim |
 | :--- | :--- | :--- |
@@ -339,7 +421,7 @@ To ensure scientific credibility, RAGmortem distinguishes strictly between **con
 
 ---
 
-## 10. Known Limitations
+## 11. Known Limitations
 
 * **Embedding Distribution Calibration**: RAGmortem includes distribution-aware auto-calibration (`ScoreCalibrator`) supporting OpenAI (`text-embedding-3-small/large`), Cohere (`embed-v3`), BGE (`bge-large-en-v1.5`), and MiniLM baselines. When evaluating unknown embedding distributions, empirical distribution calibration automatically analyzes observed candidate pools (mean, spread, z-scores) rather than relying exclusively on fixed thresholds.
 * **Semantic Verification vs. Token Matching**: Answer verification defaults to fast deterministic token matching and seamlessly upgrades to local NLI / Cross-Encoder entailment verification when installed via `pip install ragmortem[local-nli]`, enabling robust semantic verification for paraphrased responses.
@@ -352,7 +434,7 @@ To ensure scientific credibility, RAGmortem distinguishes strictly between **con
 
 ---
 
-## 11. Testing
+## 12. Testing
 
 Run the full offline test suite:
 
@@ -364,7 +446,7 @@ All 124 tests run 100% offline on CPU without network requests or API keys.
 
 ---
 
-## 12. License
+## 13. License
 
 Apache-2.0 License. See [LICENSE](LICENSE) for details.
 
