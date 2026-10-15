@@ -257,6 +257,12 @@ def execute_diagnose_cases(
         payload["cases"] = results
         payload["summary"] = summary_data
         output_str = json.dumps(payload, indent=2)
+        if out:
+            out_path = Path(out)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(output_str, encoding="utf-8")
+        else:
+            print(output_str)
     elif fmt == "md":
         lines = [
             "# RAGmortem Diagnostic Report",
@@ -294,43 +300,25 @@ def execute_diagnose_cases(
         lines.append(f"- **UNKNOWN Rate**: {unknown_rate_pct}% ({unknown_count}/{total_cases})")
         lines.append("")
         output_str = "\n".join(lines)
+        if out:
+            out_path = Path(out)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(output_str, encoding="utf-8")
+        else:
+            print(output_str)
     else:
-        # Default text format
-        lines = []
-        if is_demo:
-            lines.append("=" * 70)
-            lines.append("SYNTHETIC DEMO DATA — RAGmortem Diagnoser Evaluation")
-            lines.append("=" * 70)
-            lines.append("")
-        for i, c in enumerate(results, start=1):
-            lines.append(f"Case {i}: [{c['id']}]")
-            lines.append(f"  Diagnosis:                 {c['diagnosis_english']}")
-            lines.append(f"  Mode:                      {c['mode']}")
-            lines.append(f"  Confidence:                {c['confidence']:.2f}")
-            lines.append("  Evidence:")
-            for ev in c["evidence"]:
-                lines.append(f"    • {ev}")
-            lines.append(f"  {c['what_this_cannot_tell_you']}")
-            lines.append(f"  {c['suggested_next_check']}")
-            lines.append("")
-
-        lines.append("=" * 70)
-        lines.append("SUMMARY")
-        lines.append("-" * 70)
-        lines.append(f"Total Cases: {total_cases}")
-        lines.append("Counts per Diagnosis:")
-        for diag, cnt in sorted(counts.items()):
-            lines.append(f"  • {diag}: {cnt}")
-        lines.append(f"UNKNOWN Rate: {unknown_rate_pct}% ({unknown_count}/{total_cases})")
-        lines.append("=" * 70)
-        output_str = "\n".join(lines)
-
-    if out:
-        out_path = Path(out)
-        out_path.parent.mkdir(parents=True, exist_ok=True)
-        out_path.write_text(output_str, encoding="utf-8")
-    else:
-        print(output_str)
+        from ragmortem.terminal import render_rich_report
+        if out:
+            import io
+            from rich.console import Console
+            file_buf = io.StringIO()
+            file_console = Console(file=file_buf, force_terminal=False, width=100)
+            render_rich_report(results, summary_data, is_demo=is_demo, console=file_console)
+            out_path = Path(out)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(file_buf.getvalue(), encoding="utf-8")
+        else:
+            render_rich_report(results, summary_data, is_demo=is_demo)
 
     return 0
 
@@ -350,64 +338,8 @@ def cmd_demo(args: argparse.Namespace) -> int:
 
 def cmd_schema(args: argparse.Namespace) -> int:
     """Print the input trace schema and a full valid example."""
-    schema_text = """RAGmortem Input Case Schema
-===========================
-
-Accepts a single JSON file ({...}), a JSON array ([{...}, ...]), or a JSONL file (one JSON object per line).
-
-Fields:
-  • id: (optional, string) Unique trace or case identifier.
-  • question: (required, string) User query or question (alias: query).
-  • answer: (required, string) Answer produced by the RAG pipeline (alias: generated_answer).
-  • retrieved: (required, list) Retrieved context chunks provided to the generator.
-      - chunk_id: (optional, string) Unique chunk identifier (alias: id).
-      - text: (optional, string) Text snippet of the chunk (alias: content).
-      - score: (optional, float) Relevance/similarity score.
-  • candidates: (optional, list) Full candidate pool before top-k truncation (same shape as retrieved).
-  • top_k: (optional, int) Context window cutoff size.
-  • reference_answer: (optional, string) Expected ground-truth answer for reference-assisted verification.
-  • score_type: (optional, string) "similarity" (default), "cosine_distance", or "distance".
-
-Full JSON Example:
-{
-  "id": "case_101",
-  "question": "What is the mandatory engineering response time for a P1 incident?",
-  "answer": "The response time for P1 incidents is 24 hours.",
-  "retrieved": [
-    {
-      "chunk_id": "chunk_p1_sla",
-      "text": "For Priority 1 (P1) critical incidents, the engineering team must respond within 15 minutes.",
-      "score": 0.88
-    },
-    {
-      "chunk_id": "chunk_p2_sla",
-      "text": "For Priority 2 (P2) major incidents, the response time is 1 hour.",
-      "score": 0.52
-    }
-  ],
-  "candidates": [
-    {
-      "chunk_id": "chunk_p1_sla",
-      "text": "For Priority 1 (P1) critical incidents, the engineering team must respond within 15 minutes.",
-      "score": 0.88
-    },
-    {
-      "chunk_id": "chunk_p2_sla",
-      "text": "For Priority 2 (P2) major incidents, the response time is 1 hour.",
-      "score": 0.52
-    },
-    {
-      "chunk_id": "chunk_p3_sla",
-      "text": "For Priority 3 (P3) minor incidents, the response time is 1 business day.",
-      "score": 0.35
-    }
-  ],
-  "top_k": 2,
-  "reference_answer": "15 minutes",
-  "score_type": "similarity"
-}
-"""
-    print(schema_text.strip())
+    from ragmortem.terminal import render_schema
+    render_schema()
     return 0
 
 
