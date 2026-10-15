@@ -325,6 +325,15 @@ def execute_diagnose_cases(
             out_path.write_text(output_str, encoding="utf-8")
         else:
             print(output_str)
+    elif fmt == "html":
+        from ragmortem.report_html import render_html_report
+        output_str = render_html_report(results, summary_data, is_demo=is_demo, profile=profile)
+        if out:
+            out_path = Path(out)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            out_path.write_text(output_str, encoding="utf-8")
+        else:
+            print(output_str)
     else:
         from ragmortem.terminal import render_rich_report
         if out:
@@ -625,9 +634,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     demo_p.add_argument(
         "--format",
-        choices=["text", "json", "md"],
+        choices=["text", "json", "md", "html"],
         default="text",
-        help="Output format: text (default), json, or md",
+        help="Output format: text (default), json, md, or html",
     )
     demo_p.add_argument(
         "--profile",
@@ -681,9 +690,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     )
     diag_p.add_argument(
         "--format",
-        choices=["text", "json", "md"],
+        choices=["text", "json", "md", "html"],
         default="text",
-        help="Output format: text (default), json, or md",
+        help="Output format: text (default), json, md, or html",
     )
     diag_p.add_argument(
         "--out",

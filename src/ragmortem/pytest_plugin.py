@@ -27,7 +27,62 @@ import pytest
 
 from ragmortem.api import diagnose
 from ragmortem.diagnose import DiagnosticResult
+from ragmortem.taxonomy import FailureType
 from ragmortem.trace import Trace, trace
+
+
+def ragmortem_assert(
+    trace_input: Trace | dict[str, Any] | Any,
+    corpus: Any | None = None,
+    reference_answer: str | None = None,
+    mode: str | None = None,
+    profile: str = "minilm",
+    **kwargs: Any,
+) -> DiagnosticResult:
+    """Diagnose a RAG execution trace and assert no failure occurred.
+
+    If a failure is diagnosed (i.e. diagnosis.canonical != FailureType.NO_FAILURE),
+    formats the Rich diagnostic failure card and raises an AssertionError with the detailed report.
+    """
+    diag_res = diagnose(
+        trace_input=trace_input,
+        corpus=corpus,
+        reference_answer=reference_answer,
+        mode=mode,
+        profile=profile,
+        **kwargs,
+    )
+    if diag_res.diagnosis.canonical != FailureType.NO_FAILURE:
+        buf = io.StringIO()
+        try:
+            from rich.console import Console
+            from ragmortem.terminal import render_diagnostic_card
+            console = Console(file=buf, force_terminal=True, width=100)
+            console.print()
+            render_diagnostic_card(
+                diag_res,
+                title=f"RAGmortem Diagnosis: {diag_res.diagnosis.value.upper()}",
+                console=console,
+            )
+            card_output = buf.getvalue()
+        except Exception:
+            card_output = f"\nRAGmortem Diagnosis: {diag_res.to_text()}\n"
+
+        reasons = "; ".join(diag_res.reasons) if diag_res.reasons else diag_res.explanation
+        msg = (
+            f"RAG Assertion Failed: [{diag_res.diagnosis.value.upper()}] (evidence={diag_res.evidence_score:.2f})\n"
+            f"Reason: {reasons}\n"
+            f"{card_output}"
+        )
+        raise AssertionError(msg)
+    return diag_res
+
+
+@pytest.fixture(name="ragmortem_assert")
+def _ragmortem_assert_fixture() -> Any:
+    """Pytest fixture providing the ragmortem_assert assertion helper."""
+    return ragmortem_assert
+
 
 
 class RAGTraceRecorder:
@@ -245,7 +300,8 @@ def pytest_runtest_makereport(item: pytest.Item, call: pytest.CallInfo[None]) ->
 
     # Append to longrepr / stderr
     if hasattr(report, "longreprtext"):
-        report.longrepr = f"{report.longreprtext}\n{card_output}"
+        if "RAGmortem" not in report.longreprtext and "RAG Assertion Failed" not in report.longreprtext:
+            report.longrepr = f"{report.longreprtext}\n{card_output}"
     else:
         sys.stderr.write(card_output)
 

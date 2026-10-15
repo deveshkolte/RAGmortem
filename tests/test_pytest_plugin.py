@@ -103,3 +103,60 @@ def test_record_trace_context_manager() -> None:
         assert rec.current_trace is not None
         assert rec.current_trace.query == "What is the SLA?"
         assert rec.current_trace.scores == [0.85]
+
+
+def test_ragmortem_assert_failure_raises() -> None:
+    """Verifies that ragmortem_assert raises AssertionError with Rich diagnostic report on failure."""
+    from ragmortem.pytest_plugin import ragmortem_assert
+
+    bad_trace = {
+        "query": "What is the mandatory engineering response time for a P1 incident?",
+        "retrieved_chunks": [
+            {"id": "c1", "text": "P1 SLA is 15 minutes.", "score": 0.88}
+        ],
+        "answer": "The SLA is 48 hours.",
+    }
+
+    with pytest.raises(AssertionError) as exc_info:
+        ragmortem_assert(bad_trace, reference_answer="15 minutes")
+
+    msg = str(exc_info.value)
+    assert "RAG Assertion Failed" in msg
+    assert "GENERATION_SUSPECTED" in msg or "GENERATION_IGNORED_CONTEXT" in msg or "GENERATION" in msg
+
+
+def test_ragmortem_assert_success_passes() -> None:
+    """Verifies that ragmortem_assert returns DiagnosticResult on valid RAG execution."""
+    from ragmortem.pytest_plugin import ragmortem_assert
+
+    good_trace = {
+        "query": "What is the mandatory engineering response time for a P1 incident?",
+        "retrieved_chunks": [
+            {"id": "c1", "text": "P1 SLA is 15 minutes.", "score": 0.88}
+        ],
+        "answer": "P1 SLA is 15 minutes.",
+    }
+
+    res = ragmortem_assert(good_trace, reference_answer="15 minutes")
+    assert res.diagnosis.value.lower() == "no_failure"
+
+
+def test_ragmortem_assert_fixture_in_pytester(pytester: pytest.Pytester) -> None:
+    """Verifies that ragmortem_assert fixture works inside pytest test cases."""
+    pytester.makepyfile(
+        """
+        def test_rag_via_fixture(ragmortem_assert):
+            trace = {
+                "query": "What is the SLA?",
+                "retrieved_chunks": [{"id": "c1", "text": "SLA is 15 minutes.", "score": 0.88}],
+                "answer": "48 hours",
+            }
+            ragmortem_assert(trace, reference_answer="15 minutes")
+        """
+    )
+    result = pytester.runpytest()
+    result.assert_outcomes(failed=1)
+    stdout = result.stdout.str()
+    assert "RAG Assertion Failed" in stdout
+    assert "RAGmortem Diagnosis" in stdout
+

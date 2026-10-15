@@ -19,6 +19,8 @@ from ragmortem.callbacks import (
     LlamaIndexRAGmortemHandler,
 )
 from ragmortem.importers import import_trace, detect_format
+from ragmortem.integrations import from_langchain, from_llamaindex
+from ragmortem.pytest_plugin import ragmortem_assert
 
 __all__ = [
     "diagnose",
@@ -35,6 +37,9 @@ __all__ = [
     "RAGmortemCallbackHandler",
     "LangChainRAGmortemHandler",
     "LlamaIndexRAGmortemHandler",
+    "from_langchain",
+    "from_llamaindex",
+    "ragmortem_assert",
     "import_trace",
     "detect_format",
     "__version__",
