@@ -272,6 +272,91 @@ def render_case_card(
     )
 
 
+def render_diagnostic_card(
+    result: Any,
+    title: str = "RAGmortem Failure Diagnosis",
+    console: Console | None = None,
+) -> None:
+    """Render a standalone DiagnosticResult in a styled executive card."""
+    if console is None:
+        console = get_console()
+
+    diag_val = (
+        getattr(result, "diagnosis", None)
+        or (result.get("diagnosis") if isinstance(result, dict) else "unknown")
+    )
+    if hasattr(diag_val, "value"):
+        diag_val = diag_val.value
+    diag_str = str(diag_val).lower()
+    meta = DIAGNOSIS_META.get(diag_str, DIAGNOSIS_META["unknown"])
+
+    conf = float(getattr(result, "evidence_score", 0.0) if hasattr(result, "evidence_score") else getattr(result, "confidence", 0.0))
+    meter = _render_meter(conf, width=10)
+
+    title_left = Text.assemble(
+        ("🔬 ", "bold yellow"),
+        (title, "bold white"),
+    )
+    status_badge = Text.assemble(
+        (f" {meta['icon']} {meta['badge']} ", f"bold {meta['color']} on {meta['bg']}"),
+    )
+
+    card_header = Table.grid(expand=True)
+    card_header.add_column(justify="left")
+    card_header.add_column(justify="right")
+    card_header.add_row(title_left, status_badge)
+
+    meta_table = Table.grid(padding=(0, 2), expand=True)
+    meta_table.add_column(style="dim white", width=16)
+    meta_table.add_column(style="white", ratio=1)
+
+    meta_table.add_row(
+        Text("Diagnosis:", style="bold #abb2bf"),
+        Text(f"{meta['target']} ({diag_str})", style=f"bold {meta['color']}"),
+    )
+    meta_table.add_row(
+        Text("Confidence:", style="bold #abb2bf"),
+        meter,
+    )
+
+    mode = getattr(result, "mode", "trace_only")
+    meta_table.add_row(
+        Text("Mode:", style="bold #abb2bf"),
+        Text(f"`{mode}`", style="#61afef"),
+    )
+
+    evidence_items = getattr(result, "evidence", []) or []
+    reasons_items = getattr(result, "reasons", []) or []
+
+    bullets = []
+    for r in reasons_items:
+        bullets.append(Text.assemble(("  • ", "bold #e5c07b"), (r, "white")))
+    for ev in evidence_items:
+        bullets.append(Text.assemble(("  • ", "dim #98c379"), (ev, "dim #abb2bf")))
+
+    evidence_text = Group(
+        Text("Root-Cause Evidence & Telemetry:", style="bold #e5c07b"),
+        *bullets,
+    ) if bullets else Text("")
+
+    card_content = Group(
+        card_header,
+        Rule(style="#21262d"),
+        meta_table,
+        Text(""),
+        evidence_text,
+    )
+
+    console.print(
+        Panel(
+            card_content,
+            box=box.ROUNDED,
+            border_style=meta["color"],
+            padding=(1, 2),
+        )
+    )
+
+
 def render_summary_dashboard(
     console: Console,
     summary_data: dict[str, Any],

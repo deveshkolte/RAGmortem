@@ -61,6 +61,9 @@ Issues = "https://github.com/deveshkolte/RAGmortem/issues"
 [project.scripts]
 ragmortem = "ragmortem.cli:main"
 
+[project.entry-points.pytest11]
+ragmortem = "ragmortem.pytest_plugin"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 
