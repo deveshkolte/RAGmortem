@@ -16,6 +16,7 @@ from ragmortem.faults.models import InjectedFaultCase
 from ragmortem.taxonomy import FailureType
 from ragmortem.types import Chunk, RagResult
 from ragmortem.support import evaluate_corpus_answerability, SupportClassification
+from ragmortem.calibration import ScoreCalibrator, CalibratedThresholds
 
 
 @dataclass
@@ -492,6 +493,11 @@ class RAGDiagnoser:
         self.score_margin_threshold = score_margin_threshold
         self.ambiguity_band = ambiguity_band
         self.model_name = model_name
+        self.calibrator = ScoreCalibrator(
+            default_model=model_name,
+            fallback_band=ambiguity_band,
+            fallback_cutoff_gap=0.08,
+        )
 
         if corpus_chunks is not None:
             self.chunks_by_id = {c.id: c for c in corpus_chunks}
@@ -629,7 +635,7 @@ class RAGDiagnoser:
             cand_scores = trace.candidate_scores
 
         # -------------------------------------------------------------
-        # 3. Extract Relative Telemetry Signals
+        # 3. Extract Relative Telemetry Signals & Auto-Calibrate
         # -------------------------------------------------------------
         top_score = scores[0]
         last_score = scores[-1]
@@ -649,12 +655,30 @@ class RAGDiagnoser:
         has_extended_candidates = bool(cand_ids and len(cand_ids) > top_k)
         signals["has_extended_candidates"] = has_extended_candidates
 
+        # Calibrate thresholds dynamically to observed score distribution / model
+        calib = self.calibrator.calibrate(
+            scores=scores,
+            candidate_scores=cand_scores,
+            model_name=trace.metadata.get("model") or getattr(self, "model_name", None),
+        )
+        low_bound = calib.low_bound
+        high_bound = calib.high_bound
+        cutoff_gap_thresh = calib.cutoff_gap
+        false_refusal_thresh = calib.false_refusal_threshold
+        spread_min_thresh = calib.score_spread_min
+        signals["calibration"] = calib.to_dict()
+
+        if calib.is_auto_calibrated:
+            evidence.append(
+                f"Auto-calibrated thresholds to score distribution ({calib.model_profile}): ambiguity band [{low_bound:.2f}, {high_bound:.2f}]."
+            )
+
         # -------------------------------------------------------------
         # 4. Path A: System generated a refusal/abstention
         # -------------------------------------------------------------
         if is_refusal:
             # False refusal check: context score is strong
-            if top_score >= 0.54 or (top_score >= 0.50 and score_spread >= 0.10):
+            if top_score >= false_refusal_thresh or (top_score >= (low_bound + 0.03) and score_spread >= spread_min_thresh):
                 evidence.append(
                     f"Model abstained from answering despite high retrieval score (top score: {top_score:.3f})."
                 )
@@ -700,12 +724,12 @@ class RAGDiagnoser:
 
             signals["cutoff_gap"] = cutoff_gap
 
-            if top_score >= 0.50 and cutoff_gap <= 0.08:
+            if top_score >= low_bound and cutoff_gap <= cutoff_gap_thresh:
                 evidence.append(
                     f"Candidate retrieval pool contained {cand_count} chunks, truncated to top-{top_k}."
                 )
                 evidence.append(
-                    f"Strong candidate exists immediately below cutoff (score gap: {cutoff_gap:.4f} <= 0.08)."
+                    f"Strong candidate exists immediately below cutoff (score gap: {cutoff_gap:.4f} <= {cutoff_gap_thresh:.2f})."
                 )
                 evidence.append("Root cause (suspected): Candidate retrieval succeeded, but ranking omitted evidence.")
                 reasons.append("Ranking cutoff: Viable candidate demoted below top-k context window.")
@@ -722,7 +746,7 @@ class RAGDiagnoser:
                     candidate_count=cand_count,
                     signals=signals,
                 )
-            elif top_score < 0.47:
+            elif top_score < low_bound:
                 # Conflicting signals: candidate truncation coincides with very low scores
                 evidence.append(
                     f"Candidate pool has {cand_count} items, but retrieval scores are very low (top: {top_score:.3f})."
@@ -740,7 +764,6 @@ class RAGDiagnoser:
                 )
 
         # Check 2: Borderline Ambiguity Range Check
-        low_bound, high_bound = self.ambiguity_band
         if low_bound <= top_score <= high_bound:
             evidence.append(
                 f"Retrieved context top score ({top_score:.3f}) lies in ambiguity band [{low_bound}, {high_bound}]."
