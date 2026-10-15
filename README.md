@@ -1,5 +1,9 @@
 # RAGmortem
 
+[![PyPI version](https://img.shields.io/pypi/v/ragmortem.svg)](https://pypi.org/project/ragmortem/)
+[![Python versions](https://img.shields.io/pypi/pyversions/ragmortem.svg)](https://pypi.org/project/ragmortem/)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
+
 A debugger for RAG apps: it finds why an answer went wrong — retrieval, ranking, generation, or lack of evidence — and tests the diagnosis before you ship it.
 
 > **Project Status: Experimental open-source RAG debugger (v0.1)**  
@@ -87,7 +91,25 @@ RAGmortem uses an uncertainty-aware decision tree operating on observable execut
 
 Requires **Python >= 3.11**.
 
-Install from GitHub:
+### Zero-Friction Instant CLI (No Installation Needed)
+
+Run the bundled failure demonstration immediately using `uvx`:
+```bash
+uvx ragmortem demo
+```
+
+Inspect input trace schema and full JSON format:
+```bash
+uvx ragmortem schema
+```
+
+### Install from PyPI
+
+```bash
+pip install ragmortem
+```
+
+Or install from GitHub:
 ```bash
 pip install git+https://github.com/deveshkolte/RAGmortem.git
 ```
@@ -96,7 +118,7 @@ Or for local development:
 ```bash
 git clone https://github.com/deveshkolte/RAGmortem.git
 cd RAGmortem
-pip install -e .
+pip install -e ".[dev]"
 ```
 
 ### CLI Quickstart
@@ -107,25 +129,27 @@ ragmortem --version
 # or: python -m ragmortem --version
 ```
 
-Run the bundled demonstration on 5 synthetic failure cases:
+Run the bundled demonstration on 5 synthetic failure cases with the screenshot-worthy Rich terminal UI:
 ```bash
 ragmortem demo
+# or instant zero-install:
+uvx ragmortem demo
 ```
 
-View input trace schema with a full example:
+View input trace schema with interactive Rich syntax highlighting:
 ```bash
 ragmortem schema
 ```
 
 Diagnose your own execution traces:
 ```bash
-# Trace-only diagnosis
+# Trace-only diagnosis with screenshot-worthy Rich terminal UI
 ragmortem diagnose trace.json
 
 # Corpus-aware diagnosis
 ragmortem diagnose traces.jsonl --corpus path/to/documents
 
-# Export report as JSON or Markdown
+# Export report as structured JSON or clean Markdown
 ragmortem diagnose trace.json --format json --out report.json
 ragmortem diagnose trace.json --format md --out report.md
 ```
