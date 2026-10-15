@@ -18,6 +18,7 @@ from ragmortem.callbacks import (
     LangChainRAGmortemHandler,
     LlamaIndexRAGmortemHandler,
 )
+from ragmortem.importers import import_trace, detect_format
 
 __all__ = [
     "diagnose",
@@ -34,5 +35,7 @@ __all__ = [
     "RAGmortemCallbackHandler",
     "LangChainRAGmortemHandler",
     "LlamaIndexRAGmortemHandler",
+    "import_trace",
+    "detect_format",
     "__version__",
 ]

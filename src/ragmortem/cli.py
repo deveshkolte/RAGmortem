@@ -351,10 +351,21 @@ def cmd_diagnose(args: argparse.Namespace) -> int:
         return 2
 
     try:
-        cases = load_input_cases(input_path)
-    except Exception as exc:
-        print(f"Error reading input '{input_path}': {exc}", file=sys.stderr)
-        return 2
+        from ragmortem.importers import detect_format, import_trace
+        with open(input_path, "r", encoding="utf-8") as f:
+            raw_data = json.load(f)
+        fmt_detected = detect_format(raw_data)
+        if fmt_detected in ("phoenix", "langsmith", "otel"):
+            t = import_trace(raw_data)
+            cases = [t.to_dict()]
+        else:
+            cases = load_input_cases(input_path)
+    except Exception:
+        try:
+            cases = load_input_cases(input_path)
+        except Exception as exc:
+            print(f"Error reading input '{input_path}': {exc}", file=sys.stderr)
+            return 2
 
     corpus_dir = Path(args.corpus) if args.corpus else None
     if corpus_dir and not corpus_dir.exists():
@@ -371,6 +382,44 @@ def cmd_diagnose(args: argparse.Namespace) -> int:
         mode=getattr(args, "mode", None),
         reference_answer=getattr(args, "reference_answer", None),
     )
+
+
+def cmd_import(args: argparse.Namespace) -> int:
+    """Import an OpenTelemetry, Phoenix, or LangSmith trace JSON file."""
+    input_path = Path(args.input)
+    if not input_path.exists():
+        print(f"Error: Input file '{input_path}' does not exist.", file=sys.stderr)
+        return 2
+
+    try:
+        from ragmortem.importers import import_trace, detect_format
+        with open(input_path, "r", encoding="utf-8") as f:
+            raw_data = json.load(f)
+        detected = detect_format(raw_data)
+        t = import_trace(raw_data)
+    except Exception as exc:
+        print(f"Error importing trace '{input_path}': {exc}", file=sys.stderr)
+        return 2
+
+    out_data = t.to_dict()
+    if args.out:
+        out_p = Path(args.out)
+        out_p.parent.mkdir(parents=True, exist_ok=True)
+        out_p.write_text(json.dumps(out_data, indent=2), encoding="utf-8")
+        print(f"Successfully imported {detected.upper()} trace -> {args.out}")
+    else:
+        print(json.dumps(out_data, indent=2))
+
+    if getattr(args, "diagnose", False):
+        from ragmortem.api import diagnose
+        result = diagnose(t)
+        try:
+            from ragmortem.terminal import render_diagnostic_card
+            render_diagnostic_card(result, title=f"Imported {detected.upper()} Diagnosis")
+        except Exception:
+            print(result.to_text())
+
+    return 0
 
 
 
@@ -629,6 +678,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     dt_p.add_argument("--mode", choices=["trace_only", "corpus_aware", "trace-only", "corpus-aware"], default=None)
     dt_p.add_argument("--json", action="store_true")
 
+    # import
+    imp_p = subparsers.add_parser(
+        "import",
+        help="Import an OpenTelemetry, Phoenix, or LangSmith trace JSON file into RAGmortem Trace format.",
+    )
+    imp_p.add_argument("input", help="Path to trace file (OpenTelemetry, Phoenix, or LangSmith JSON).")
+    imp_p.add_argument("--out", default=None, help="Optional output JSON path.")
+    imp_p.add_argument("--diagnose", action="store_true", help="Directly diagnose the imported trace.")
+
     # Developer commands (legacy)
     val_p = subparsers.add_parser("validate-dataset")
     val_p.add_argument("--questions", default="evals/questions.jsonl")
@@ -677,6 +735,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return cmd_diagnose(args)
     elif args.command == "diagnose-trace":
         return cmd_diagnose_trace(args)
+    elif args.command == "import":
+        return cmd_import(args)
     elif args.command == "validate-dataset":
         return cmd_validate_dataset(args)
     elif args.command == "run-reference":
