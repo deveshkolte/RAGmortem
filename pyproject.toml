@@ -42,6 +42,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+local-nli = [
+    "transformers>=4.30.0",
+    "torch>=2.0.0",
+]
 dev = [
     "pytest>=7.0.0",
     "build>=1.0.0",

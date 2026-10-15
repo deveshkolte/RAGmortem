@@ -35,11 +35,8 @@ def is_abstaining(answer: str) -> bool:
     return False
 
 
-def is_answer_correct(candidate: str, gold_answer: str) -> bool:
-    """Deterministic check verifying if candidate answer captures gold facts."""
-    if is_abstaining(candidate):
-        return False
-
+def _lexical_token_match(candidate: str, gold_answer: str) -> bool:
+    """Fast lexical token subsequence and keyword overlap matching."""
     norm_cand = normalize_text(candidate)
     norm_gold = normalize_text(gold_answer)
 
@@ -67,6 +64,33 @@ def is_answer_correct(candidate: str, gold_answer: str) -> bool:
 
     matched_tokens = sum(1 for tok in key_gold_tokens if tok in cand_token_set)
     return (matched_tokens / len(key_gold_tokens)) >= 0.8
+
+
+def is_answer_correct(candidate: str, gold_answer: str, verifier: Any | None = None) -> bool:
+    """Verify if candidate answer captures gold facts.
+
+    1. Checks abstention patterns (returns False on refusal).
+    2. Fast path: exact token subsequence & keyword overlap.
+    3. Semantic path: local NLI / Cross-Encoder verification for paraphrases
+       when local-nli is available or a verifier is supplied.
+    """
+    if is_abstaining(candidate):
+        return False
+
+    if _lexical_token_match(candidate, gold_answer):
+        return True
+
+    # Local NLI / Cross-Encoder semantic verification
+    try:
+        from ragmortem.nli import get_default_verifier
+
+        v = verifier if verifier is not None else get_default_verifier()
+        if v is not None and v.is_available():
+            return v.verify(candidate, gold_answer)
+    except Exception:
+        pass
+
+    return False
 
 
 
