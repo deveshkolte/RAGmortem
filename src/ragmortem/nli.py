@@ -11,12 +11,49 @@ Optional dependency:
 from __future__ import annotations
 
 import logging
+import math
 import os
+import re
+import string
 from typing import Any, Protocol
 
 logger = logging.getLogger("ragmortem.nli")
 
 DEFAULT_NLI_MODEL = "cross-encoder/nli-deberta-v3-mini"
+
+
+def compute_ngram_cosine_similarity(text1: str, text2: str, n: int = 3) -> float:
+    """Compute character n-gram cosine similarity between two strings (dependency-free)."""
+    def _norm(s: str) -> str:
+        s = s.lower()
+        s = re.sub(f"[{re.escape(string.punctuation)}]", " ", s)
+        return " ".join(s.split())
+
+    t1 = _norm(text1)
+    t2 = _norm(text2)
+    if not t1 or not t2:
+        return 0.0
+    if t1 == t2:
+        return 1.0
+
+    def _ngrams(s: str) -> dict[str, int]:
+        padded = f" {s} "
+        counts: dict[str, int] = {}
+        for i in range(max(1, len(padded) - n + 1)):
+            gram = padded[i : i + n]
+            counts[gram] = counts.get(gram, 0) + 1
+        return counts
+
+    ng1 = _ngrams(t1)
+    ng2 = _ngrams(t2)
+
+    dot = sum(cnt * ng2.get(gram, 0) for gram, cnt in ng1.items())
+    mag1 = math.sqrt(sum(cnt * cnt for cnt in ng1.values()))
+    mag2 = math.sqrt(sum(cnt * cnt for cnt in ng2.values()))
+
+    if mag1 == 0.0 or mag2 == 0.0:
+        return 0.0
+    return dot / (mag1 * mag2)
 
 
 class CrossEncoderProtocol(Protocol):
@@ -86,25 +123,46 @@ class LocalNLIVerifier:
             self._load_failed = True
             return False
 
+    def _verify_ngram_fallback(self, candidate: str, gold_answer: str, threshold: float = 0.50) -> bool:
+        """Fast, dependency-free character n-gram cosine fallback for paraphrases."""
+        def _norm(s: str) -> str:
+            s = s.lower()
+            s = re.sub(f"[{re.escape(string.punctuation)}]", " ", s)
+            return " ".join(s.split())
+
+        norm_cand = _norm(candidate)
+        norm_gold = _norm(gold_answer)
+        if not norm_cand or not norm_gold:
+            return False
+
+        # Numeric token check: if gold specifies numbers, candidate must have them
+        gold_digits = [w for w in norm_gold.split() if w.isdigit()]
+        cand_words = set(norm_cand.split())
+        if gold_digits and not all(d in cand_words for d in gold_digits):
+            return False
+
+        sim = compute_ngram_cosine_similarity(norm_cand, norm_gold, n=3)
+        return sim >= threshold
+
     def verify(self, candidate: str, gold_answer: str) -> bool:
         """Verify whether candidate response entails or validates gold answer facts."""
         if not candidate or not gold_answer:
             return False
 
-        if not self.is_available():
+        if not self.enabled:
             return False
 
-        if not self._ensure_loaded():
-            return False
+        # 1. Try heavy neural model if available
+        if self.is_available() and self._ensure_loaded():
+            try:
+                preds = self._model.predict([(candidate, gold_answer)])
+                if self._is_entailment(preds):
+                    return True
+            except Exception as exc:
+                logger.debug("NLI verification error: %s", exc)
 
-        try:
-            # Pair: (premise=candidate, hypothesis=gold_answer)
-            # Model evaluates if the generated answer entails the reference facts
-            preds = self._model.predict([(candidate, gold_answer)])
-            return self._is_entailment(preds)
-        except Exception as exc:
-            logger.debug("NLI verification error: %s", exc)
-            return False
+        # 2. Dependency-free character n-gram cosine fallback (zero heavy deps)
+        return self._verify_ngram_fallback(candidate, gold_answer)
 
     def _is_entailment(self, prediction: Any) -> bool:
         """Determine whether prediction represents entailment above threshold."""

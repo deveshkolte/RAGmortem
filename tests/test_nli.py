@@ -111,3 +111,67 @@ def test_binary_and_scalar_predictions() -> None:
 
     v2 = LocalNLIVerifier(model=BinaryModel(), threshold=0.50)
     assert v2.verify("cand", "gold") is True
+
+
+def test_ngram_cosine_similarity() -> None:
+    """Test dependency-free character n-gram cosine similarity."""
+    from ragmortem.nli import compute_ngram_cosine_similarity
+
+    # Exact match
+    assert compute_ngram_cosine_similarity("fifteen minutes", "fifteen minutes") == 1.0
+
+    # Strong paraphrase
+    sim = compute_ngram_cosine_similarity(
+        "Quarterly disaster recovery drills must be completed.",
+        "Disaster recovery exercises are mandated quarterly.",
+    )
+    assert sim >= 0.50
+
+    # Unrelated
+    sim_unrelated = compute_ngram_cosine_similarity("Apple fruit", "Quantum mechanics")
+    assert sim_unrelated < 0.20
+
+
+def test_verify_answer_detailed_methods() -> None:
+    """verify_answer returns detailed VerificationResult with lexical vs semantic method."""
+    from ragmortem.faults.eval import verify_answer
+
+    # 1. Lexical match
+    res_lex = verify_answer("Response time is 15 minutes.", "15 minutes")
+    assert res_lex.is_correct is True
+    assert res_lex.method == "lexical"
+    assert bool(res_lex) is True
+
+    # 2. Semantic n-gram fallback (zero heavy deps)
+    res_sem = verify_answer(
+        "Quarterly disaster recovery exercises are mandated.",
+        "Disaster recovery drills must occur quarterly.",
+    )
+    assert res_sem.is_correct is True
+    assert "semantic" in res_sem.method
+
+
+def test_dynamic_what_this_cannot_tell_you() -> None:
+    """diagnose() sets dynamic limitation string based on lexical vs semantic verification."""
+    from ragmortem.api import diagnose
+    from ragmortem.cli import get_what_this_cannot_tell_you
+
+    # Lexical match
+    diag_lex = diagnose(
+        query="What is the response time?",
+        retrieved_chunks=[{"id": "c1", "text": "15 minutes"}],
+        answer="The response time is 15 minutes.",
+        reference_answer="15 minutes",
+    )
+    cannot_tell_lex = get_what_this_cannot_tell_you(diag_lex.mode, diag_lex.limitations)
+    assert "Reference matching is lexical" in cannot_tell_lex
+
+    # Semantic match (paraphrase)
+    diag_sem = diagnose(
+        query="What is the drill frequency?",
+        retrieved_chunks=[{"id": "c1", "text": "Disaster recovery exercises are mandated quarterly."}],
+        answer="Disaster recovery drills must occur quarterly.",
+        reference_answer="Quarterly disaster recovery exercises are mandated.",
+    )
+    cannot_tell_sem = get_what_this_cannot_tell_you(diag_sem.mode, diag_sem.limitations)
+    assert "Reference matching used semantic verification" in cannot_tell_sem

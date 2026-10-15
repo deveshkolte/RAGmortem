@@ -1049,13 +1049,25 @@ class RAGDiagnoser:
         evidence: list[str] = []
         signals: dict[str, Any] = {"reference_answer": reference_answer}
 
-        # 1. Deterministic answer verification
-        if is_answer_correct(trace.generated_answer, reference_answer):
-            evidence.append(f"Generated answer satisfies expected reference answer: '{trace.generated_answer}'.")
+        # 1. Answer verification (deterministic lexical + semantic fallback)
+        from ragmortem.faults.eval import verify_answer
+        ver_res = verify_answer(trace.generated_answer, reference_answer)
+        method_kind = "semantic" if "semantic" in ver_res.method else "lexical"
+        signals["verification_method"] = method_kind
+        limitations: list[str] = []
+
+        if method_kind == "semantic":
+            limitations.append("Reference matching used semantic verification; complex multi-hop reasoning or external factual drift is not verified.")
+        else:
+            limitations.append("Reference matching is lexical; semantic equivalence or paraphrased answers are not verified.")
+
+        if ver_res.is_correct:
+            evidence.append(f"Generated answer satisfies expected reference answer ({method_kind}): '{trace.generated_answer}'.")
             return DiagnosticResult(
                 diagnosis=FailureType.NO_FAILURE,
                 confidence=1.0,
                 evidence=evidence,
+                limitations=limitations,
                 mode="reference_assisted",
                 is_suspected=False,
                 signals=signals,
@@ -1071,6 +1083,7 @@ class RAGDiagnoser:
                 diagnosis=FailureType.GENERATION_PROVEN,
                 confidence=0.95,
                 evidence=evidence,
+                limitations=limitations,
                 mode="reference_assisted",
                 is_suspected=False,
                 signals=signals,
@@ -1108,6 +1121,7 @@ class RAGDiagnoser:
                 diagnosis=FailureType.GENERATION_PROVEN,
                 confidence=1.0,
                 evidence=evidence,
+                limitations=limitations,
                 mode="reference_assisted",
                 is_suspected=False,
                 signals=signals,
@@ -1142,6 +1156,7 @@ class RAGDiagnoser:
                 diagnosis=FailureType.RANKING_MISS,
                 confidence=1.0,
                 evidence=evidence,
+                limitations=limitations,
                 mode="reference_assisted",
                 is_suspected=False,
                 candidate_rank=matching_cand_rank,
@@ -1170,6 +1185,7 @@ class RAGDiagnoser:
                     diagnosis=FailureType.RETRIEVAL_MISS,
                     confidence=1.0,
                     evidence=evidence,
+                    limitations=limitations,
                     mode="reference_assisted",
                     is_suspected=False,
                     signals=signals,
@@ -1183,6 +1199,7 @@ class RAGDiagnoser:
                     diagnosis=FailureType.SHOULD_ABSTAIN,
                     confidence=0.90,
                     evidence=evidence,
+                    limitations=limitations,
                     mode="reference_assisted",
                     is_suspected=False,
                     signals=signals,
@@ -1198,6 +1215,7 @@ class RAGDiagnoser:
                 diagnosis=FailureType.UNKNOWN,
                 confidence=0.50,
                 evidence=evidence,
+                limitations=limitations,
                 mode="reference_assisted",
                 is_suspected=True,
                 signals=signals,

@@ -66,31 +66,68 @@ def _lexical_token_match(candidate: str, gold_answer: str) -> bool:
     return (matched_tokens / len(key_gold_tokens)) >= 0.8
 
 
+from dataclasses import dataclass
+from typing import Any
+
+
+@dataclass(frozen=True)
+class VerificationResult:
+    """Detailed verification outcome indicating correctness and verification method."""
+
+    is_correct: bool
+    method: str  # "lexical", "semantic_cross_encoder", "semantic_ngram", "abstention", "none"
+    similarity: float | None = None
+    reason: str = ""
+
+    def __bool__(self) -> bool:
+        return self.is_correct
+
+
+def verify_answer(
+    candidate: str,
+    gold_answer: str,
+    verifier: Any | None = None,
+) -> VerificationResult:
+    """Verify if candidate answer captures gold facts, returning detailed method used."""
+    if is_abstaining(candidate):
+        return VerificationResult(is_correct=False, method="abstention", reason="Refusal detected")
+
+    # Fast deterministic lexical / numeric matching
+    if _lexical_token_match(candidate, gold_answer):
+        return VerificationResult(is_correct=True, method="lexical", similarity=1.0)
+
+    # Semantic path: local cross-encoder or character n-gram cosine fallback
+    try:
+        from ragmortem.nli import get_default_verifier, compute_ngram_cosine_similarity
+        v = verifier if verifier is not None else get_default_verifier()
+        if v is not None and getattr(v, "enabled", True):
+            # Check neural cross-encoder if available
+            if v.is_available() and v._ensure_loaded():
+                try:
+                    preds = v._model.predict([(candidate, gold_answer)])
+                    if v._is_entailment(preds):
+                        return VerificationResult(is_correct=True, method="semantic_cross_encoder", similarity=0.90)
+                except Exception:
+                    pass
+
+            # Fast zero heavy deps fallback (character n-gram cosine)
+            if hasattr(v, "_verify_ngram_fallback") and v._verify_ngram_fallback(candidate, gold_answer):
+                sim = compute_ngram_cosine_similarity(candidate, gold_answer)
+                return VerificationResult(is_correct=True, method="semantic_ngram", similarity=round(sim, 4))
+    except Exception:
+        pass
+
+    return VerificationResult(is_correct=False, method="none")
+
+
 def is_answer_correct(candidate: str, gold_answer: str, verifier: Any | None = None) -> bool:
     """Verify if candidate answer captures gold facts.
 
     1. Checks abstention patterns (returns False on refusal).
     2. Fast path: exact token subsequence & keyword overlap.
-    3. Semantic path: local NLI / Cross-Encoder verification for paraphrases
-       when local-nli is available or a verifier is supplied.
+    3. Semantic path: local NLI / Cross-Encoder or character n-gram cosine fallback.
     """
-    if is_abstaining(candidate):
-        return False
-
-    if _lexical_token_match(candidate, gold_answer):
-        return True
-
-    # Local NLI / Cross-Encoder semantic verification
-    try:
-        from ragmortem.nli import get_default_verifier
-
-        v = verifier if verifier is not None else get_default_verifier()
-        if v is not None and v.is_available():
-            return v.verify(candidate, gold_answer)
-    except Exception:
-        pass
-
-    return False
+    return verify_answer(candidate, gold_answer, verifier=verifier).is_correct
 
 
 
