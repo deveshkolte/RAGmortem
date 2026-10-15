@@ -109,6 +109,11 @@ uvx ragmortem schema
 pip install ragmortem
 ```
 
+For fast local NLI / cross-encoder semantic answer verification:
+```bash
+pip install "ragmortem[local-nli]"
+```
+
 Or install from GitHub:
 ```bash
 pip install git+https://github.com/deveshkolte/RAGmortem.git
@@ -118,7 +123,7 @@ Or for local development:
 ```bash
 git clone https://github.com/deveshkolte/RAGmortem.git
 cd RAGmortem
-pip install -e ".[dev]"
+pip install -e ".[dev,local-nli]"
 ```
 
 ### CLI Quickstart
@@ -336,8 +341,8 @@ To ensure scientific credibility, RAGmortem distinguishes strictly between **con
 
 ## 10. Known Limitations
 
-* **Calibrated on a Single Embedding Setup**: Diagnostic score thresholds (`0.47`, `0.50`, `0.53`, `0.54`) and cutoff gap (`0.08`) were calibrated on **`sentence-transformers/all-MiniLM-L6-v2`** (384-dimensional dense cosine similarities). Different embedding models (e.g. OpenAI `text-embedding-3-small`, BGE-large, Cohere Embed v3) exhibit different similarity distributions, score dynamics, and score spreads.
-* **Lexical Reference Matching**: Reference answer verification in `is_answer_correct` uses deterministic token matching (contiguous token subsequence match or $\ge 80\%$ key-token overlap with exact numeric token matching). This is **not semantic equivalence** — answers with different phrasing or synonyms will not match.
+* **Embedding Distribution Calibration**: RAGmortem includes distribution-aware auto-calibration (`ScoreCalibrator`) supporting OpenAI (`text-embedding-3-small/large`), Cohere (`embed-v3`), BGE (`bge-large-en-v1.5`), and MiniLM baselines. When evaluating unknown embedding distributions, empirical distribution calibration automatically analyzes observed candidate pools (mean, spread, z-scores) rather than relying exclusively on fixed thresholds.
+* **Semantic Verification vs. Token Matching**: Answer verification defaults to fast deterministic token matching and seamlessly upgrades to local NLI / Cross-Encoder entailment verification when installed via `pip install ragmortem[local-nli]`, enabling robust semantic verification for paraphrased responses.
 * **`GENERATION_PROVEN` Means Lexical Evidence, Not Proof**: The enum label `GENERATION_PROVEN` denotes that the reference answer text was verbatim contained within the retrieved context chunks, yet the generator failed to produce it. It does not represent formal mathematical or logical proof.
 * **Counterfactual Replay Requires Gold Chunk**: Counterfactual replay only runs in `oracle` mode, which strictly requires a verified `gold_chunk_id`.
 * **Synthetic Benchmark Labels**: All labels in the project's evaluation datasets (`evals/`) were generated synthetically using the project's own fault injector. No real-world production outages or third-party datasets have been evaluated yet. See [docs/EVIDENCE.md](docs/EVIDENCE.md) for full provenance and tuning history.
