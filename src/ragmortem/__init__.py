@@ -1,6 +1,6 @@
 """RAGmortem: An open-source RAG failure debugger."""
 
-__version__ = "0.2.0.dev0"
+__version__ = "0.2.0"
 
 from ragmortem.types import Chunk, RagResult
 from ragmortem.adapter import RagAdapter

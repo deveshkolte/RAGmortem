@@ -8,7 +8,7 @@ import sys
 from pathlib import Path
 from typing import Any, Sequence
 
-__version__ = "0.2.0.dev0"
+__version__ = "0.2.0"
 from ragmortem.api import diagnose
 from ragmortem.demo_data import DEMO_CASES
 from ragmortem.dataset import load_questions, validate_dataset
