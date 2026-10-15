@@ -13,6 +13,11 @@ from ragmortem.retrieval import (
     load_corpus_from_directory,
     parse_chunks_from_markdown,
 )
+from ragmortem.callbacks import (
+    RAGmortemCallbackHandler,
+    LangChainRAGmortemHandler,
+    LlamaIndexRAGmortemHandler,
+)
 
 __all__ = [
     "diagnose",
@@ -26,5 +31,8 @@ __all__ = [
     "CorpusRetriever",
     "load_corpus_from_directory",
     "parse_chunks_from_markdown",
+    "RAGmortemCallbackHandler",
+    "LangChainRAGmortemHandler",
+    "LlamaIndexRAGmortemHandler",
     "__version__",
 ]
