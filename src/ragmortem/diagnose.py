@@ -723,6 +723,12 @@ class RAGDiagnoser:
                 cutoff_gap = 0.01
 
             signals["cutoff_gap"] = cutoff_gap
+            from ragmortem.terminal import build_cutoff_info
+            signals["cutoff_info"] = build_cutoff_info(
+                retrieved_chunks=[{"id": cid, "score": scores[i] if scores and i < len(scores) else None} for i, cid in enumerate(trace.retrieved_chunk_ids[:top_k])],
+                candidate_chunks=[{"id": cid, "score": cand_scores[i] if cand_scores and i < len(cand_scores) else None} for i, cid in enumerate(cand_ids)] if cand_ids else None,
+                top_k=top_k,
+            )
 
             if top_score >= low_bound and cutoff_gap <= cutoff_gap_thresh:
                 evidence.append(

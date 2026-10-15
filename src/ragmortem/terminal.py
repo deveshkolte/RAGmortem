@@ -113,6 +113,161 @@ def _render_meter(score: float, width: int = 10) -> str:
     return "█" * filled + "░" * empty
 
 
+def build_cutoff_info(
+    retrieved_chunks: list[dict[str, Any]] | Sequence[Any] | None,
+    candidate_chunks: list[dict[str, Any]] | Sequence[Any] | None = None,
+    top_k: int | None = None,
+    scores: list[float] | None = None,
+    candidate_scores: list[float] | None = None,
+) -> dict[str, Any] | None:
+    """Build structured cutoff representation for candidate pool and prompt context."""
+    if not retrieved_chunks and not candidate_chunks:
+        return None
+
+    def _to_chunk_dict(c: Any, idx: int, default_score: float | None = None) -> dict[str, Any]:
+        if isinstance(c, dict):
+            cid = str(c.get("id") or c.get("chunk_id") or f"chunk_{idx}")
+            sc = c.get("score")
+            try:
+                sc_f = float(sc) if sc is not None else default_score
+            except (ValueError, TypeError):
+                sc_f = default_score
+            return {"id": cid, "score": sc_f}
+        cid = str(getattr(c, "id", c))
+        sc = getattr(c, "score", default_score)
+        try:
+            sc_f = float(sc) if sc is not None else default_score
+        except (ValueError, TypeError):
+            sc_f = default_score
+        return {"id": cid, "score": sc_f}
+
+    norm_ret: list[dict[str, Any]] = []
+    if retrieved_chunks:
+        for i, c in enumerate(retrieved_chunks):
+            default_sc = scores[i] if scores and i < len(scores) else None
+            norm_ret.append(_to_chunk_dict(c, i + 1, default_sc))
+
+    norm_cand: list[dict[str, Any]] = []
+    if candidate_chunks:
+        for i, c in enumerate(candidate_chunks):
+            default_sc = candidate_scores[i] if candidate_scores and i < len(candidate_scores) else None
+            norm_cand.append(_to_chunk_dict(c, i + 1, default_sc))
+
+    eff_top_k = top_k if top_k is not None and top_k > 0 else (len(norm_ret) if norm_ret else 2)
+
+    if norm_cand:
+        ret_ids = [r["id"] for r in norm_ret]
+        cand_ids = [c["id"] for c in norm_cand]
+        if len(norm_cand) > eff_top_k:
+            ret_pool = norm_cand[:eff_top_k]
+            dropped_pool = norm_cand[eff_top_k:]
+        elif norm_ret:
+            overlap = any(cid in ret_ids for cid in cand_ids)
+            if overlap:
+                ret_pool = norm_cand[:eff_top_k]
+                dropped_pool = norm_cand[eff_top_k:]
+            else:
+                ret_pool = norm_ret[:eff_top_k]
+                dropped_pool = norm_cand
+        else:
+            ret_pool = norm_cand[:eff_top_k]
+            dropped_pool = norm_cand[eff_top_k:]
+    else:
+        ret_pool = norm_ret[:eff_top_k]
+        dropped_pool = []
+
+    ret_list = []
+    for rank, c in enumerate(ret_pool, start=1):
+        ret_list.append({
+            "rank": rank,
+            "id": c["id"],
+            "score": c["score"],
+        })
+
+    last_ret_score = ret_list[-1]["score"] if (ret_list and ret_list[-1]["score"] is not None) else None
+
+    dropped_list = []
+    for offset, c in enumerate(dropped_pool, start=1):
+        rank = eff_top_k + offset
+        sc = c["score"]
+        gap = (sc - last_ret_score) if (sc is not None and last_ret_score is not None) else 0.0
+        dropped_list.append({
+            "rank": rank,
+            "id": c["id"],
+            "score": sc,
+            "gap": gap,
+        })
+
+    return {
+        "top_k": eff_top_k,
+        "retrieved": ret_list,
+        "dropped": dropped_list,
+    }
+
+
+def render_cutoff_list(cutoff_info: dict[str, Any]) -> Group | None:
+    """Render a compact visual chunk cutoff list inside a diagnostic panel."""
+    if not cutoff_info:
+        return None
+    retrieved = cutoff_info.get("retrieved", [])
+    dropped = cutoff_info.get("dropped", [])
+    top_k = cutoff_info.get("top_k", len(retrieved))
+
+    if not retrieved and not dropped:
+        return None
+
+    items: list[Any] = [
+        Text("Context Window & Cutoff (Ranked Candidates):", style="bold #abb2bf"),
+    ]
+
+    for item in retrieved:
+        rank = item.get("rank", 1)
+        score = item.get("score")
+        cid = item.get("id") or f"chunk_{rank}"
+        score_val = float(score) if score is not None else 0.0
+        score_str = f"[{score_val:.3f}]" if score is not None else "[ N/A ]"
+        meter = _render_meter(score_val, width=10)
+
+        line = Text.assemble(
+            (f"  #{rank} ", "bold cyan"),
+            (f"{score_str} ", "white"),
+            (f"{meter} ", "#61afef"),
+            (f"{cid} ", "bright_white"),
+            ("(In Prompt)", "dim #98c379"),
+        )
+        items.append(line)
+
+    divider = Text(f"  ────────── ✂️ TOP-K CUTOFF (k={top_k}) ──────────", style="bold #e5c07b")
+    items.append(divider)
+
+    for item in dropped:
+        rank = item.get("rank", top_k + 1)
+        score = item.get("score")
+        cid = item.get("id") or f"chunk_{rank}"
+        gap = item.get("gap", 0.0)
+        score_val = float(score) if score is not None else 0.0
+        score_str = f"[{score_val:.3f}]" if score is not None else "[ N/A ]"
+        meter = _render_meter(score_val, width=10)
+
+        if isinstance(gap, (int, float)):
+            gap_style = "bold #ff5f5f" if abs(gap) <= 0.05 else "bold #e5c07b"
+            gap_text = f"⚠️ ({gap:+.3f} gap)"
+        else:
+            gap_style = "bold #e5c07b"
+            gap_text = f"⚠️ ({gap})"
+
+        line = Text.assemble(
+            (f"  #{rank} ", gap_style),
+            (f"{score_str} ", "white"),
+            (f"{meter} ", "#e5c07b"),
+            (f"{cid} ", "bright_white"),
+            (gap_text, gap_style),
+        )
+        items.append(line)
+
+    return Group(*items)
+
+
 def render_header(console: Console, *, is_demo: bool = False, version: str = "0.2.0") -> None:
     """Print the primary RAGmortem header banner."""
     header_table = Table.grid(expand=True)
@@ -250,17 +405,30 @@ def render_case_card(
         (next_check.replace("Suggested next check: ", ""), "#98c379"),
     )
 
-    card_content = Group(
+    card_parts: list[Any] = [
         card_header,
         Rule(style="#21262d"),
         meta_table,
         Text(""),
         evidence_text,
+    ]
+
+    cutoff_info = case_data.get("cutoff_info")
+    cutoff_renderable = render_cutoff_list(cutoff_info) if cutoff_info else None
+    if cutoff_renderable is not None:
+        card_parts.extend([
+            Rule(style="#21262d"),
+            cutoff_renderable,
+        ])
+
+    card_parts.extend([
         Rule(style="#21262d"),
         cannot_tell_text,
         Text(""),
         next_check_text,
-    )
+    ])
+
+    card_content = Group(*card_parts)
 
     console.print(
         Panel(
@@ -339,13 +507,30 @@ def render_diagnostic_card(
         *bullets,
     ) if bullets else Text("")
 
-    card_content = Group(
+    cutoff_info = (
+        getattr(result, "cutoff_info", None)
+        or (result.get("cutoff_info") if isinstance(result, dict) else None)
+        or getattr(result, "signals", {}).get("cutoff_info")
+        or (result.get("signals", {}).get("cutoff_info") if isinstance(result, dict) else None)
+        or getattr(result, "metadata", {}).get("cutoff_info")
+        or (result.get("metadata", {}).get("cutoff_info") if isinstance(result, dict) else None)
+    )
+    cutoff_renderable = render_cutoff_list(cutoff_info) if cutoff_info else None
+
+    card_parts_diag: list[Any] = [
         card_header,
         Rule(style="#21262d"),
         meta_table,
         Text(""),
         evidence_text,
-    )
+    ]
+    if cutoff_renderable is not None:
+        card_parts_diag.extend([
+            Rule(style="#21262d"),
+            cutoff_renderable,
+        ])
+
+    card_content = Group(*card_parts_diag)
 
     console.print(
         Panel(

@@ -226,6 +226,21 @@ def execute_diagnose_cases(
         if diag_val.lower() == "unknown":
             unknown_count += 1
 
+        cutoff_info = None
+        has_extended = bool(cand_chunks and len(cand_chunks) > len(ret_chunks))
+        is_ranking = "ranking" in diag_val.lower()
+        if has_extended or is_ranking or (hasattr(diag_res, "signals") and diag_res.signals.get("cutoff_info")):
+            from ragmortem.terminal import build_cutoff_info
+            if hasattr(diag_res, "signals") and diag_res.signals.get("cutoff_info"):
+                cutoff_info = diag_res.signals["cutoff_info"]
+            else:
+                cutoff_info = build_cutoff_info(
+                    retrieved_chunks=ret_chunks,
+                    candidate_chunks=cand_chunks,
+                    top_k=eff_top_k or len(ret_chunks),
+                    scores=explicit_scores,
+                )
+
         results.append({
             "id": case_id,
             "question": str(question),
@@ -237,6 +252,7 @@ def execute_diagnose_cases(
             "evidence": diag_res.evidence,
             "what_this_cannot_tell_you": cannot_tell_you,
             "suggested_next_check": next_check,
+            "cutoff_info": cutoff_info,
         })
 
     total_cases = len(cases)
