@@ -488,15 +488,19 @@ class RAGDiagnoser:
         score_margin_threshold: float = 0.05,
         ambiguity_band: tuple[float, float] = (0.47, 0.53),
         model_name: str = "all-MiniLM-L6-v2",
+        profile: str | CalibrationProfile = "minilm",
     ) -> None:
         self.app = app
         self.score_margin_threshold = score_margin_threshold
         self.ambiguity_band = ambiguity_band
         self.model_name = model_name
+        from ragmortem.calibration import CalibrationProfile
+        self.profile = CalibrationProfile.from_name(profile)
         self.calibrator = ScoreCalibrator(
+            profile=self.profile,
             default_model=model_name,
             fallback_band=ambiguity_band,
-            fallback_cutoff_gap=0.08,
+            fallback_cutoff_gap=self.profile.cutoff_gap,
         )
 
         if corpus_chunks is not None:
@@ -656,10 +660,12 @@ class RAGDiagnoser:
         signals["has_extended_candidates"] = has_extended_candidates
 
         # Calibrate thresholds dynamically to observed score distribution / model
+        profile_req = trace.metadata.get("profile") or getattr(self, "profile", None)
         calib = self.calibrator.calibrate(
             scores=scores,
             candidate_scores=cand_scores,
             model_name=trace.metadata.get("model") or getattr(self, "model_name", None),
+            profile=profile_req,
         )
         low_bound = calib.low_bound
         high_bound = calib.high_bound
@@ -679,9 +685,14 @@ class RAGDiagnoser:
         if is_refusal:
             # False refusal check: context score is strong
             if top_score >= false_refusal_thresh or (top_score >= (low_bound + 0.03) and score_spread >= spread_min_thresh):
-                evidence.append(
-                    f"Model abstained from answering despite high retrieval score (top score: {top_score:.3f})."
-                )
+                if calib.is_relative:
+                    evidence.append(
+                        f"Model abstained from answering despite high retrieval score (top score: {top_score:.3f}, pool Z-score: {calib.relative_z_score:+.2f} [relative])."
+                    )
+                else:
+                    evidence.append(
+                        f"Model abstained from answering despite high retrieval score (top score: {top_score:.3f} >= {false_refusal_thresh:.2f} [{calib.model_profile}])."
+                    )
                 evidence.append("Context contained salient information, but generator produced a refusal.")
                 reasons.append("Generator false refusal: Abstention emitted despite relevant context.")
                 ev_score = round(min(0.95, float(top_score)), 4)
@@ -719,10 +730,13 @@ class RAGDiagnoser:
         if has_extended_candidates:
             if cand_scores and len(cand_scores) > top_k:
                 cutoff_gap = cand_scores[top_k - 1] - cand_scores[top_k]
+                cliff_ratio = (cand_scores[top_k - 1] - cand_scores[top_k]) / max(top_score, 1e-6)
             else:
                 cutoff_gap = 0.01
+                cliff_ratio = 0.01
 
             signals["cutoff_gap"] = cutoff_gap
+            signals["cliff_ratio"] = round(cliff_ratio, 4)
             from ragmortem.terminal import build_cutoff_info
             signals["cutoff_info"] = build_cutoff_info(
                 retrieved_chunks=[{"id": cid, "score": scores[i] if scores and i < len(scores) else None} for i, cid in enumerate(trace.retrieved_chunk_ids[:top_k])],
@@ -730,13 +744,25 @@ class RAGDiagnoser:
                 top_k=top_k,
             )
 
-            if top_score >= low_bound and cutoff_gap <= cutoff_gap_thresh:
+            is_ranking_candidate = False
+            if calib.is_relative:
+                cliff_thresh = calib.profile.relative_cliff_ratio if calib.profile else 0.12
+                is_ranking_candidate = bool(cliff_ratio <= cliff_thresh or cutoff_gap <= cutoff_gap_thresh)
+            else:
+                is_ranking_candidate = bool(top_score >= low_bound and cutoff_gap <= cutoff_gap_thresh)
+
+            if is_ranking_candidate:
                 evidence.append(
                     f"Candidate retrieval pool contained {cand_count} chunks, truncated to top-{top_k}."
                 )
-                evidence.append(
-                    f"Strong candidate exists immediately below cutoff (score gap: {cutoff_gap:.4f} <= {cutoff_gap_thresh:.2f})."
-                )
+                if calib.is_relative:
+                    evidence.append(
+                        f"Strong candidate exists immediately below cutoff (relative cliff drop: {cliff_ratio:.3f} <= {calib.profile.relative_cliff_ratio if calib.profile else 0.12:.2f}, gap: {cutoff_gap:.4f})."
+                    )
+                else:
+                    evidence.append(
+                        f"Strong candidate exists immediately below cutoff (score gap: {cutoff_gap:.4f} <= {cutoff_gap_thresh:.2f} [{calib.model_profile}])."
+                    )
                 evidence.append("Root cause (suspected): Candidate retrieval succeeded, but ranking omitted evidence.")
                 reasons.append("Ranking cutoff: Viable candidate demoted below top-k context window.")
                 ev_score = round(max(0.70, min(0.95, 0.92 - cutoff_gap)), 4)
@@ -771,9 +797,14 @@ class RAGDiagnoser:
 
         # Check 2: Borderline Ambiguity Range Check
         if low_bound <= top_score <= high_bound:
-            evidence.append(
-                f"Retrieved context top score ({top_score:.3f}) lies in ambiguity band [{low_bound}, {high_bound}]."
-            )
+            if calib.is_relative:
+                evidence.append(
+                    f"Retrieved context top score ({top_score:.3f}) lies in relative ambiguity band [{low_bound:.2f}, {high_bound:.2f}] (Z-score: {calib.relative_z_score:+.2f})."
+                )
+            else:
+                evidence.append(
+                    f"Retrieved context top score ({top_score:.3f}) lies in ambiguity band [{low_bound:.2f}, {high_bound:.2f}] [{calib.model_profile}]."
+                )
             evidence.append("Without ground truth or reference answer, cannot distinguish distractor noise from generation failure.")
             reasons.append("Ambiguous retrieval evidence: Score near decision boundary lacks clear signal separation.")
             return DiagnosticResult(
@@ -803,7 +834,7 @@ class RAGDiagnoser:
 
                 if support_report.is_terminology_trap or support_report.classification == SupportClassification.UNSUPPORTED:
                     evidence.append(
-                        f"Retrieved context had elevated vector similarity (top score: {top_score:.3f} > {high_bound}), "
+                        f"Retrieved context had elevated vector similarity (top score: {top_score:.3f} > {high_bound:.2f} [{calib.model_profile}]), "
                         f"but support analysis confirms it is an unanswerable terminology trap lacking core entities."
                     )
                     evidence.extend(support_report.evidence_notes)
@@ -837,9 +868,14 @@ class RAGDiagnoser:
                         signals=signals,
                     )
 
-            evidence.append(
-                f"Retrieved context had high relevance score to question (top score: {top_score:.3f} > {high_bound})."
-            )
+            if calib.is_relative:
+                evidence.append(
+                    f"Retrieved context had high relevance score to question (top score: {top_score:.3f}, pool Z-score: {calib.relative_z_score:+.2f} > 0.5 [relative])."
+                )
+            else:
+                evidence.append(
+                    f"Retrieved context had high relevance score to question (top score: {top_score:.3f} > {high_bound:.2f} [{calib.model_profile}])."
+                )
             evidence.append("Context was directly supplied in top-k prompt window, but answer failed or contradicts facts.")
             reasons.append("Generation failure: High-relevance context supplied but generator failed to extract correct facts.")
             ev_score = round(min(0.95, 0.72 + (top_score - high_bound) * 0.5), 4)

@@ -30,6 +30,7 @@ def diagnose(
     reference_answer: str | None = None,
     app: Any | None = None,
     score_type: str | None = None,
+    profile: str | Any = "minilm",
 ) -> DiagnosticResult:
     """Diagnose root cause of failure for a RAG execution trace.
 
@@ -183,7 +184,10 @@ def diagnose(
             corpus_app = target_corpus
 
     # 4. Execute Diagnosis
-    diagnoser = RAGDiagnoser(app=corpus_app if norm_mode == "corpus_aware" else None)
+    diagnoser = RAGDiagnoser(
+        app=corpus_app if norm_mode == "corpus_aware" else None,
+        profile=profile,
+    )
     obs_exec = t.to_observed_execution()
 
     if reference_answer is not None:

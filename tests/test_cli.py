@@ -265,3 +265,33 @@ def test_cli_diagnose_explicit_scores_malformed(tmp_path: Path) -> None:
         exit_code = main(["diagnose", str(input_file)])
     assert exit_code == 0
     assert "malformed_explicit_case" in buf.getvalue()
+
+
+def test_cli_diagnose_with_profile(tmp_path: Path) -> None:
+    """ragmortem diagnose --profile openai applies OpenAI thresholds."""
+    case = {
+        "id": "openai_profile_test",
+        "question": "What is the policy?",
+        "answer": "Policy answer.",
+        "retrieved": [{"chunk_id": "c1", "text": "Policy chunk content.", "score": 0.70}],
+    }
+    input_file = tmp_path / "openai_case.json"
+    input_file.write_text(json.dumps(case), encoding="utf-8")
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        exit_code = main(["diagnose", str(input_file), "--profile", "openai"])
+    assert exit_code == 0
+    out = buf.getvalue()
+    assert "openai_profile_test" in out
+    # 0.70 is ambiguous under OpenAI
+    assert "UNKNOWN" in out
+
+
+def test_cli_demo_with_profile() -> None:
+    """ragmortem demo --profile relative runs cleanly."""
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        exit_code = main(["demo", "--profile", "relative"])
+    assert exit_code == 0
+    assert "SYNTHETIC DEMO DATA" in buf.getvalue()

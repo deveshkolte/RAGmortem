@@ -111,3 +111,84 @@ def test_diagnoser_with_openai_false_refusal() -> None:
 
     assert result.diagnosis == FailureType.GENERATION_SUSPECTED
     assert any("false refusal" in r.lower() for r in result.reasons)
+
+
+def test_calibration_profile_presets() -> None:
+    """Verify built-in calibration profile presets."""
+    from ragmortem.calibration import CalibrationProfile, CALIBRATION_PROFILES
+
+    minilm = CalibrationProfile.from_name("minilm")
+    assert minilm.name == "minilm"
+    assert minilm.low_bound == 0.47
+    assert minilm.high_bound == 0.53
+    assert minilm.cutoff_gap == 0.08
+    assert minilm.false_refusal_threshold == 0.54
+    assert minilm.is_relative is False
+
+    openai = CalibrationProfile.from_name("openai")
+    assert openai.name == "openai"
+    assert openai.low_bound == 0.68
+    assert openai.high_bound == 0.76
+    assert openai.cutoff_gap == 0.06
+    assert openai.false_refusal_threshold == 0.77
+    assert openai.is_relative is False
+
+    bge = CalibrationProfile.from_name("bge")
+    assert bge.name == "bge"
+    assert bge.low_bound == 0.60
+    assert bge.high_bound == 0.70
+    assert bge.cutoff_gap == 0.07
+    assert bge.false_refusal_threshold == 0.72
+    assert bge.is_relative is False
+
+    relative = CalibrationProfile.from_name("relative")
+    assert relative.name == "relative"
+    assert relative.is_relative is True
+    assert relative.relative_cliff_ratio == 0.12
+
+
+def test_diagnose_api_with_profile_parameter() -> None:
+    """diagnose() accepts profile parameter and updates evidence strings."""
+    from ragmortem.api import diagnose
+
+    # In MiniLM profile, 0.70 is high relevance (> 0.53) -> GENERATION_SUSPECTED
+    res_minilm = diagnose(
+        query="What is the response time?",
+        retrieved_chunks=[{"id": "doc1", "text": "15 mins", "score": 0.70}],
+        answer="Wrong answer",
+        profile="minilm",
+        mode="trace_only",
+    )
+    assert res_minilm.diagnosis == FailureType.GENERATION_SUSPECTED
+    assert any("0.53" in ev or "minilm" in ev for ev in res_minilm.evidence)
+
+    # In OpenAI profile, 0.70 lies in ambiguity band [0.68, 0.76] -> UNKNOWN
+    res_openai = diagnose(
+        query="What is the response time?",
+        retrieved_chunks=[{"id": "doc1", "text": "15 mins", "score": 0.70}],
+        answer="Wrong answer",
+        profile="openai",
+        mode="trace_only",
+    )
+    assert res_openai.diagnosis == FailureType.UNKNOWN
+    assert any("0.76" in ev or "openai" in ev for ev in res_openai.evidence)
+
+
+def test_diagnose_relative_mode_cliff_ratio() -> None:
+    """Relative mode computes cliff ratio (score[k-1] - score[k]) / max(score[0], 1e-6)."""
+    from ragmortem.api import diagnose
+
+    # Retrieved: score 0.70. Candidate below cutoff: score 0.68.
+    # Cliff ratio: (0.70 - 0.68) / 0.70 = 0.0286 <= 0.12 -> RANKING_SUSPECTED
+    res = diagnose(
+        query="What is the timeout?",
+        retrieved_chunks=[{"id": "c1", "score": 0.70}],
+        candidate_chunks=[{"id": "c1", "score": 0.70}, {"id": "c2", "score": 0.68}],
+        top_k=1,
+        answer="Timeout is 60s",
+        profile="relative",
+        mode="trace_only",
+    )
+    assert res.diagnosis == FailureType.RANKING_SUSPECTED
+    assert any("relative cliff drop" in ev for ev in res.evidence)
+    assert res.signals["cliff_ratio"] <= 0.05

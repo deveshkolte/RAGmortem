@@ -155,6 +155,7 @@ def execute_diagnose_cases(
     corpus: Path | str | None = None,
     top_k: int | None = None,
     score_type: str = "similarity",
+    profile: str = "minilm",
     fmt: str = "text",
     out: str | None = None,
     mode: str | None = None,
@@ -187,6 +188,7 @@ def execute_diagnose_cases(
         eff_top_k = item.get("top_k") or top_k
         eff_ref_answer = item.get("reference_answer") or reference_answer
         eff_score_type = item.get("score_type") or score_type
+        eff_profile = item.get("profile") or profile
 
         # Extract explicit scores if provided as separate array
         explicit_scores = item.get("scores")
@@ -209,6 +211,7 @@ def execute_diagnose_cases(
                 corpus=corpus,
                 mode=mode,
                 score_type=eff_score_type,
+                profile=eff_profile,
                 case_id=case_id,
             )
         except Exception as exc:
@@ -346,6 +349,7 @@ def cmd_demo(args: argparse.Namespace) -> int:
         corpus=None,
         top_k=None,
         score_type="similarity",
+        profile=getattr(args, "profile", "minilm"),
         fmt=args.format,
         out=args.out,
         is_demo=True,
@@ -393,6 +397,7 @@ def cmd_diagnose(args: argparse.Namespace) -> int:
         corpus=corpus_dir,
         top_k=args.top_k,
         score_type=args.score_type,
+        profile=getattr(args, "profile", "minilm"),
         fmt=args.format,
         out=args.out,
         mode=getattr(args, "mode", None),
@@ -625,6 +630,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Output format: text (default), json, or md",
     )
     demo_p.add_argument(
+        "--profile",
+        choices=["minilm", "openai", "bge", "relative"],
+        default="minilm",
+        help="Calibration profile: minilm (default), openai, bge, or relative.",
+    )
+    demo_p.add_argument(
         "--out",
         default=None,
         help="Optional file path to write output to.",
@@ -661,6 +672,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         choices=["similarity", "cosine_distance", "distance"],
         default="similarity",
         help="Score scale: similarity (default), cosine_distance, or distance.",
+    )
+    diag_p.add_argument(
+        "--profile",
+        choices=["minilm", "openai", "bge", "relative"],
+        default="minilm",
+        help="Calibration profile: minilm (default), openai, bge, or relative.",
     )
     diag_p.add_argument(
         "--format",
