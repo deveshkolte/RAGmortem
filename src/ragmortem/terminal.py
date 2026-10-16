@@ -326,8 +326,15 @@ def render_case_card(
     console: Console,
     case_idx: int,
     case_data: dict[str, Any],
+    *,
+    compact: bool = False,
 ) -> None:
-    """Render a single failure case in an executive card panel."""
+    """Render a single failure case in an executive card panel.
+
+    In ``compact`` mode the question, answer, evidence bullets, and guardrail
+    notes are omitted, keeping the diagnosis, confidence, and top-k cutoff
+    chart. Used for condensed marketing/hero renders.
+    """
     diag_val = case_data.get("diagnosis", "unknown").lower()
     meta = DIAGNOSIS_META.get(diag_val, DIAGNOSIS_META["unknown"])
 
@@ -368,10 +375,11 @@ def render_case_card(
             ("]", "dim #8b949e"),
         ),
     )
-    meta_table.add_row(
-        Text("Mode:", style="dim #8b949e"),
-        Text(f"{mode}", style="cyan"),
-    )
+    if not compact:
+        meta_table.add_row(
+            Text("Mode:", style="dim #8b949e"),
+            Text(f"{mode}", style="cyan"),
+        )
     meta_table.add_row(
         Text("Confidence:", style="dim #8b949e"),
         Text.assemble(
@@ -379,32 +387,17 @@ def render_case_card(
             (f"[{meter}]", f"{meta['color']}"),
         ),
     )
-    if question:
-        meta_table.add_row(
-            Text("Question:", style="dim #8b949e"),
-            Text(f'"{question}"', style="bright_white"),
-        )
-    if answer:
-        meta_table.add_row(
-            Text("Answer:", style="dim #8b949e"),
-            Text(f'"{answer}"', style="dim bright_white"),
-        )
-
-    # Evidence bullet points
-    evidence_items = case_data.get("evidence", [])
-    evidence_text = Text("Evidence:\n", style="bold #abb2bf")
-    if evidence_items:
-        for ev in evidence_items:
-            evidence_text.append(f"  • {ev}\n", style="#dcdfe4")
-    else:
-        evidence_text.append("  • (No explicit telemetry evidence recorded)\n", style="dim")
-
-    # Guardrails: What this cannot tell you
-    cannot_tell = case_data.get("what_this_cannot_tell_you", "")
-    cannot_tell_text = Text.assemble(
-        ("What this cannot tell you: ", "bold #e5c07b"),
-        (cannot_tell.replace("What this cannot tell you: ", ""), "dim #dcdfe4"),
-    )
+    if not compact:
+        if question:
+            meta_table.add_row(
+                Text("Question:", style="dim #8b949e"),
+                Text(f'"{question}"', style="bright_white"),
+            )
+        if answer:
+            meta_table.add_row(
+                Text("Answer:", style="dim #8b949e"),
+                Text(f'"{answer}"', style="dim bright_white"),
+            )
 
     # Recommended action / next check
     next_check = case_data.get("suggested_next_check", "")
@@ -417,9 +410,18 @@ def render_case_card(
         card_header,
         Rule(style="#21262d"),
         meta_table,
-        Text(""),
-        evidence_text,
     ]
+
+    if not compact:
+        # Evidence bullet points
+        evidence_items = case_data.get("evidence", [])
+        evidence_text = Text("Evidence:\n", style="bold #abb2bf")
+        if evidence_items:
+            for ev in evidence_items:
+                evidence_text.append(f"  • {ev}\n", style="#dcdfe4")
+        else:
+            evidence_text.append("  • (No explicit telemetry evidence recorded)\n", style="dim")
+        card_parts.extend([Text(""), evidence_text])
 
     cutoff_info = case_data.get("cutoff_info")
     cutoff_renderable = render_cutoff_list(cutoff_info) if cutoff_info else None
@@ -429,12 +431,16 @@ def render_case_card(
             cutoff_renderable,
         ])
 
-    card_parts.extend([
-        Rule(style="#21262d"),
-        cannot_tell_text,
-        Text(""),
-        next_check_text,
-    ])
+    card_parts.append(Rule(style="#21262d"))
+    if not compact:
+        # Guardrails: What this cannot tell you
+        cannot_tell = case_data.get("what_this_cannot_tell_you", "")
+        cannot_tell_text = Text.assemble(
+            ("What this cannot tell you: ", "bold #e5c07b"),
+            (cannot_tell.replace("What this cannot tell you: ", ""), "dim #dcdfe4"),
+        )
+        card_parts.extend([cannot_tell_text, Text("")])
+    card_parts.append(next_check_text)
 
     card_content = Group(*card_parts)
 
@@ -443,7 +449,7 @@ def render_case_card(
             card_content,
             box=box.ROUNDED,
             border_style=meta["color"],
-            padding=(1, 2),
+            padding=(0, 2) if compact else (1, 2),
         )
     )
 
@@ -553,8 +559,14 @@ def render_diagnostic_card(
 def render_summary_dashboard(
     console: Console,
     summary_data: dict[str, Any],
+    *,
+    compact: bool = False,
 ) -> None:
-    """Render an executive summary telemetry dashboard."""
+    """Render an executive summary telemetry dashboard.
+
+    In ``compact`` mode the per-diagnosis breakdown table is omitted, keeping
+    the KPI row and totals. Used for condensed marketing/hero renders.
+    """
     total_cases = summary_data.get("total_cases", 0)
     unknown_count = summary_data.get("unknown_count", 0)
     unknown_rate = summary_data.get("unknown_rate_pct", 0.0)
@@ -614,23 +626,31 @@ def render_summary_dashboard(
         )
 
     # Summary Panel Container
+    panel_parts: list[Any] = [
+        Text("SUMMARY & TELEMETRY BREAKDOWN", style="bold white"),
+    ]
+    if not compact:
+        panel_parts.append(Rule(style="#30363d"))
+    panel_parts.append(kpi_table)
+    if not compact:
+        panel_parts.extend([
+            Text(""),
+            Text("Counts per Diagnosis:", style="bold #abb2bf"),
+            breakdown_table,
+        ])
+    panel_parts.append(
+        Text(
+            f"Total Cases: {total_cases}  •  UNKNOWN Rate: {unknown_rate:.1f}% ({unknown_count}/{total_cases})",
+            style="dim #8b949e",
+        )
+    )
+
     console.print(
         Panel(
-            Group(
-                Text("SUMMARY & TELEMETRY BREAKDOWN", style="bold white"),
-                Rule(style="#30363d"),
-                kpi_table,
-                Text(""),
-                Text("Counts per Diagnosis:", style="bold #abb2bf"),
-                breakdown_table,
-                Text(
-                    f"Total Cases: {total_cases}  •  UNKNOWN Rate: {unknown_rate:.1f}% ({unknown_count}/{total_cases})",
-                    style="dim #8b949e",
-                ),
-            ),
+            Group(*panel_parts),
             box=box.ROUNDED,
             border_style="#61afef",
-            padding=(1, 2),
+            padding=(0, 2) if compact else (1, 2),
         )
     )
 

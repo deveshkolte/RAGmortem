@@ -149,20 +149,17 @@ def _normalize_chunks(raw_chunks: Any) -> list[dict[str, Any]]:
     return normalized
 
 
-def execute_diagnose_cases(
+def evaluate_cases(
     cases: list[dict[str, Any]],
     *,
     corpus: Path | str | None = None,
     top_k: int | None = None,
     score_type: str = "similarity",
     profile: str = "minilm",
-    fmt: str = "text",
-    out: str | None = None,
     mode: str | None = None,
     reference_answer: str | None = None,
-    is_demo: bool = False,
-) -> int:
-    """Run diagnosis across a list of input trace cases and render formatted report."""
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Diagnose each case and return rendered result dicts plus the run summary."""
     results: list[dict[str, Any]] = []
     counts: dict[str, int] = {}
     unknown_count = 0
@@ -171,13 +168,11 @@ def execute_diagnose_cases(
         case_id = str(item.get("id") or item.get("case_id") or f"case_{idx}")
         question = item.get("question") or item.get("query")
         if not question or not str(question).strip():
-            print(f"Error: Case '{case_id}' missing required field: 'question' (or 'query').", file=sys.stderr)
-            return 2
+            raise ValueError(f"Case '{case_id}' missing required field: 'question' (or 'query').")
 
         answer = item.get("answer") or item.get("generated_answer")
         if answer is None or not str(answer).strip():
-            print(f"Error: Case '{case_id}' missing required field: 'answer' (or 'generated_answer').", file=sys.stderr)
-            return 2
+            raise ValueError(f"Case '{case_id}' missing required field: 'answer' (or 'generated_answer').")
 
         raw_ret = item.get("retrieved") or item.get("retrieved_chunks") or item.get("retrieved_chunk_ids") or []
         ret_chunks = _normalize_chunks(raw_ret)
@@ -215,8 +210,7 @@ def execute_diagnose_cases(
                 case_id=case_id,
             )
         except Exception as exc:
-            print(f"Error diagnosing case '{case_id}': {exc}", file=sys.stderr)
-            return 2
+            raise ValueError(f"diagnosing case '{case_id}': {exc}") from exc
 
         diag_val = diag_res.diagnosis.value
         diag_english = DIAGNOSIS_PLAIN_ENGLISH.get(diag_val.lower(), diag_val.upper())
@@ -267,6 +261,41 @@ def execute_diagnose_cases(
         "unknown_count": unknown_count,
         "unknown_rate_pct": unknown_rate_pct,
     }
+    return results, summary_data
+
+
+def execute_diagnose_cases(
+    cases: list[dict[str, Any]],
+    *,
+    corpus: Path | str | None = None,
+    top_k: int | None = None,
+    score_type: str = "similarity",
+    profile: str = "minilm",
+    fmt: str = "text",
+    out: str | None = None,
+    mode: str | None = None,
+    reference_answer: str | None = None,
+    is_demo: bool = False,
+) -> int:
+    """Run diagnosis across a list of input trace cases and render formatted report."""
+    try:
+        results, summary_data = evaluate_cases(
+            cases,
+            corpus=corpus,
+            top_k=top_k,
+            score_type=score_type,
+            profile=profile,
+            mode=mode,
+            reference_answer=reference_answer,
+        )
+    except ValueError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        return 2
+
+    counts = summary_data["counts_per_diagnosis"]
+    total_cases = summary_data["total_cases"]
+    unknown_count = summary_data["unknown_count"]
+    unknown_rate_pct = summary_data["unknown_rate_pct"]
 
     # Render output according to format
     if fmt == "json":
