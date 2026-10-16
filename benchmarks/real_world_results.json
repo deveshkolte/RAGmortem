@@ -1,0 +1,58 @@
+{
+  "generated_at": "2026-10-16 09:57:16 UTC",
+  "n_cases": 50,
+  "audit_resolved": {
+    "dense": 50
+  },
+  "observed_distribution": {
+    "ranking_miss": 44,
+    "generation_ignored_context": 1,
+    "should_abstain": 2,
+    "unknown": 3
+  },
+  "reference_distribution": {
+    "ranking_miss": 36,
+    "retrieval_miss": 6,
+    "generation_ignored_context": 8
+  },
+  "observed_confusion": {
+    "generation_injected": {
+      "ranking_miss": 8
+    },
+    "ranking": {
+      "ranking_miss": 31,
+      "unknown": 3,
+      "should_abstain": 2
+    },
+    "retrieval": {
+      "ranking_miss": 5,
+      "generation_ignored_context": 1
+    }
+  },
+  "reference_confusion": {
+    "generation_injected": {
+      "generation_ignored_context": 8
+    },
+    "ranking": {
+      "ranking_miss": 36
+    },
+    "retrieval": {
+      "retrieval_miss": 6
+    }
+  },
+  "reference_accuracy": 1.0,
+  "unknown_rate_observed": 0.06,
+  "unknown_rate_reference": 0.0,
+  "latency_observed": {
+    "median_ms": 0.135,
+    "mean_ms": 1.215,
+    "p95_ms": 9.184,
+    "max_ms": 10.771
+  },
+  "latency_reference": {
+    "median_ms": 0.336,
+    "mean_ms": 0.374,
+    "p95_ms": 0.743,
+    "max_ms": 0.951
+  }
+}

@@ -336,7 +336,14 @@ def execute_diagnose_cases(
             print(output_str)
     else:
         from ragmortem.terminal import render_rich_report
-        if out:
+        if out and str(out).lower().endswith(".svg"):
+            from rich.console import Console
+            rec_console = Console(record=True, force_terminal=True, width=100)
+            render_rich_report(results, summary_data, is_demo=is_demo, console=rec_console, profile=profile)
+            out_path = Path(out)
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            rec_console.save_svg(str(out_path), title="RAGmortem - RAG Failure Diagnosis")
+        elif out:
             import io
             from rich.console import Console
             file_buf = io.StringIO()
@@ -647,7 +654,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     demo_p.add_argument(
         "--out",
         default=None,
-        help="Optional file path to write output to.",
+        help="Optional file path to write output to (use a .svg path for a shareable SVG image).",
     )
 
     # schema
