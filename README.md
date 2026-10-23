@@ -11,7 +11,7 @@ A local-first, deterministic root-cause failure debugger for RAG pipelines. It i
 uvx ragmortem demo
 ```
 
-![RAGmortem demo: deterministic root-cause diagnosis of RAG failures](docs/hero.svg)
+![RAGmortem v0.2.0 direct-outreach preview: deterministic RAG failure diagnosis with top-k cutoff meter and telemetry breakdown](docs/hero_dm.png)
 
 > **Project Status: Open-source RAG debugger (v0.2.0)**  
 > RAGmortem isolates component root causes across retrieval, ranking, generation, and abstention from execution telemetry. Features include a Rich terminal UI with visual candidate-cutoff meters, four calibration profiles (`minilm`, `openai`, `bge`, `relative`), two-tier answer verification (lexical + local NLI), 1-line LangChain/LlamaIndex callbacks, a `pytest-ragmortem` CI plugin, and validation on the public SQuAD v1.1 dataset.
