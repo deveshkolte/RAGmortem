@@ -5,7 +5,7 @@ Copy-paste-ready drafts for Show HN, Reddit, and X. Keep claims aligned with
 
 Repo: https://github.com/deveshkolte/RAGmortem
 PyPI: https://pypi.org/project/ragmortem/
-One-liner demo: `uvx ragmortem demo`
+Install + demo: `pip install ragmortem && ragmortem demo`
 
 ---
 
@@ -24,7 +24,8 @@ RAGmortem is a local, deterministic root-cause debugger for RAG. You hand it an 
 
 Everything runs on CPU, offline, with no LLM judge and no API keys:
 
-    uvx ragmortem demo
+    pip install ragmortem
+    ragmortem demo
 
 It has three modes:
 - trace-only: uses only what you logged
@@ -43,7 +44,7 @@ What I'm most interested in feedback on:
 1. Is deterministic attribution more useful to you than another probabilistic score?
 2. Which logs do you actually have in production — do you keep pre-top-k candidate scores?
 
-There's a real-world benchmark against the public SQuAD v1.1 dataset (real Wikipedia passages + questions, deterministic BM25 traces): reference-assisted mode attributed 100% (50/50) of failures to the correct component at 0% UNKNOWN, and across ~10k questions 86% of genuine retrieval failures were top-k truncation, not corpus misses. Methodology and threats to validity are in benchmarks/REAL_WORLD_RESULTS.md — I've tried to be explicit about what is simulated.
+There's a real-world benchmark against the public SQuAD v1.1 dataset (real Wikipedia passages + questions, deterministic BM25 traces): reference-assisted mode attributed 100% (50/50) of failures to the correct component at 0% UNKNOWN, across ~10k questions 86.2% of genuine retrieval failures were top-k truncation rather than corpus misses, and diagnosis runs at a median 0.19 ms per trace on CPU. Methodology and threats to validity are in benchmarks/REAL_WORLD_RESULTS.md — I've tried to be explicit about what is simulated.
 
 Apache-2.0. Happy to answer anything.
 
@@ -62,7 +63,8 @@ Most RAG eval tools give you a score. That's a dead end when you're debugging: "
 
 RAGmortem is an open-source, deterministic root-cause diagnoser. Input is a trace; output is a component verdict: `retrieval_miss`, `ranking_miss`, `generation_ignored_context`, `should_abstain`, or `unknown`. No API keys, no external judge, runs on CPU:
 
-    uvx ragmortem demo
+    pip install ragmortem
+    ragmortem demo
 
 A few things that make it different from a quality score:
 
@@ -78,7 +80,7 @@ A few things that make it different from a quality score:
 
 I also ran it against a real public dataset, not just my own fixtures. Using SQuAD v1.1 (real Wikipedia paragraphs and questions, deterministic BM25 traces):
 - reference-assisted mode: 100% (50/50) correct attribution, 0% unknown
-- over ~10k questions, 86% of actual retrieval failures were top-k truncation
+- over ~10k questions, 86.2% of actual retrieval failures were top-k truncation
 - median 0.19 ms per diagnosis, CPU-only
 
 Caveats are spelled out in the repo (simulated decoy answers rather than recorded LLM outputs; clean single-hop QA; 16-passage corpora).
@@ -101,7 +103,7 @@ It does NOT tell you what broke.
 
 I built RAGmortem: a local, deterministic root-cause debugger for RAG. CPU-only, no LLM judge, no API keys.
 
-`uvx ragmortem demo`
+`pip install ragmortem && ragmortem demo`
 
 🧵
 
@@ -133,7 +135,7 @@ I tested it on real public data, not just my own fixtures.
 SQuAD v1.1 (real Wikipedia passages + questions, deterministic BM25 traces):
 
 • 100% (50/50) correct attribution, 0% unknown (reference-assisted)
-• across ~10k questions, 86% of retrieval failures were top-k truncation
+• across ~10k questions, 86.2% of retrieval failures were top-k truncation
 • 0.19 ms median per diagnosis, CPU-only
 
 **Tweet 5/5**
@@ -141,7 +143,7 @@ Three modes: trace-only, corpus-aware (audits your index), reference-assisted (d
 
 Apache-2.0. Run it in 10 seconds:
 
-`uvx ragmortem demo`
+`pip install ragmortem && ragmortem demo`
 
 Repo + full methodology + honest caveats:
 https://github.com/deveshkolte/RAGmortem

@@ -2,11 +2,11 @@
 
 **Release date:** 2026-10-16
 
-RAGmortem is a local-first, CPU-only root-cause debugger for RAG pipelines. Give it an execution trace — query, retrieved chunks with scores, optional candidate pool, and the generated answer — and it returns a deterministic verdict naming the broken component: retrieval miss, ranking miss (evidence retrieved but cut by top-k), generation failure (evidence in prompt, answer ignored it), should-abstain, or `unknown` when telemetry is insufficient. v0.2.0 brings a screenshot-ready Rich terminal UI with top-k candidate-cliff inspection, four calibration profiles, a two-tier answer-verification stack, a built-in pytest plugin, and a real-world benchmark built on the public SQuAD v1.1 dataset.
+RAGmortem is a local-first, CPU-only root-cause debugger for RAG pipelines. Give it an execution trace — query, retrieved chunks with scores, optional candidate pool, and the generated answer — and it returns a deterministic verdict naming the broken component: retrieval miss, ranking miss (evidence retrieved but cut by top-k), generation failure (evidence in prompt, answer ignored it), should-abstain, or `unknown` when telemetry is insufficient. v0.2.0 brings a screenshot-ready Rich terminal UI with top-k candidate-cliff inspection, four calibration profiles, a two-tier answer-verification stack, a built-in pytest plugin, zero-dependency framework adapters, and a real-world benchmark built on the public SQuAD v1.1 dataset.
 
 ## Key Highlights
 
-### Rich CLI with top-k candidate cliff inspection
+### Rich CLI with a visual top-k cutoff meter
 `ragmortem demo` (zero-install via `uvx ragmortem demo`) renders an executive terminal report: per-case diagnosis badges, confidence meters, and a candidate cutoff chart that visualizes exactly where the re-ranker pushed the right chunk below the top-k context window.
 
 ```
@@ -17,7 +17,7 @@ RAGmortem is a local-first, CPU-only root-cause debugger for RAG pipelines. Give
 
 New SVG export: `ragmortem demo --out docs/hero.svg` writes a shareable SVG image of the report.
 
-### Calibration profiles: `minilm`, `openai`, `bge`, `relative`
+### Embedding calibration profiles: `minilm`, `openai`, `bge`, `relative`
 Selectable score calibration via `--profile` (CLI) or `profile=` (API):
 - `minilm` / `openai` / `bge` — distribution baselines for common embedding models (e.g. `text-embedding-3-small/large`, `bge-large-en-v1.5`, `all-MiniLM-L6-v2`).
 - `relative` — empirical auto-calibration from the observed candidate pool (mean, spread, z-scores) for unknown embedding distributions, instead of fixed thresholds.
@@ -37,6 +37,16 @@ def test_production_qa():
 ```
 
 On failure, pytest prints the retrieval/ranking/generation attribution alongside the assertion error. The `rag_trace` fixture additionally auto-diagnoses ordinary assertion failures and emits GitHub Actions annotations plus a step-summary table in CI.
+
+### Zero-dependency framework adapters
+`from_langchain()` and `from_llamaindex()` convert LangChain run outputs, LlamaIndex responses, or plain run dictionaries into standardized `Trace` instances. Both adapters are duck-typed, so neither framework is a hard dependency and neither needs to be installed:
+
+```python
+from ragmortem import diagnose, from_langchain
+
+trace_obj = from_langchain(run_output)
+result = diagnose(trace_obj)
+```
 
 ### Real-world benchmark on public data (SQuAD v1.1)
 `benchmarks/run_real_eval.py` evaluates the diagnoser on traces built from the public SQuAD v1.1 development set — real Wikipedia passages, human-written questions, deterministic BM25 retrieval traces, and verified-wrong decoy answers (no LLM calls). Full methodology and threats to validity: [`benchmarks/REAL_WORLD_RESULTS.md`](../benchmarks/REAL_WORLD_RESULTS.md).

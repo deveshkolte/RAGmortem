@@ -5,7 +5,7 @@
 [![Tests](https://img.shields.io/badge/tests-192%20passing-success.svg)](tests/)
 [![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 
-A debugger for RAG apps: it finds why an answer went wrong — retrieval, ranking, generation, or lack of evidence — and tests the diagnosis before you ship it.
+A local-first, deterministic root-cause failure debugger for RAG pipelines. It isolates retrieval misses, ranking truncation, generation hallucinations or ignored context, and unanswerable queries — 100% on CPU, offline, with zero external LLM judges or API keys.
 
 ```bash
 uvx ragmortem demo
@@ -14,18 +14,18 @@ uvx ragmortem demo
 ![RAGmortem demo: deterministic root-cause diagnosis of RAG failures](docs/hero.svg)
 
 > **Project Status: Open-source RAG debugger (v0.2.0)**  
-> RAGmortem is a fast, deterministic root-cause failure diagnoser for RAG pipelines. It isolates failures across retrieval, ranking, generation, and abstention without requiring an external LLM judge.
+> RAGmortem isolates component root causes across retrieval, ranking, generation, and abstention from execution telemetry. Features include a Rich terminal UI with visual candidate-cutoff meters, four calibration profiles (`minilm`, `openai`, `bge`, `relative`), two-tier answer verification (lexical + local NLI), 1-line LangChain/LlamaIndex callbacks, a `pytest-ragmortem` CI plugin, and validation on the public SQuAD v1.1 dataset.
 
 ```python
 from ragmortem import diagnose, Chunk
 
 # 20-second quickstart: diagnose an execution trace directly
 result = diagnose(
-    query="What is the mandatory engineering response time for a P1 incident?",
+    query="What is the response time SLA for a P1 incident?",
     retrieved_chunks=[{"id": "doc_dr", "text": "Disaster recovery drills occur quarterly.", "score": 0.14}],
     answer="Engineers must run quarterly disaster recovery exercises.",
     corpus=[
-        Chunk(id="chunk_incident_severity_p1", text="P1 (Critical) incidents require acknowledgment within 15 minutes.", source="policy"),
+        Chunk(id="chunk_incident_severity_p1", text="For P1 critical incidents, the engineering response time SLA is 15 minutes.", source="policy"),
         Chunk(id="chunk_dr_drill", text="Disaster recovery drills occur quarterly.", source="policy"),
     ],
     mode="corpus_aware",
@@ -37,7 +37,7 @@ print(result.to_text())
 Output:
 ```text
 Failure: RETRIEVAL_SUSPECTED (suspected)
-Evidence Score: 0.94
+Evidence Score: 0.95
 
 Why:
 The answer becomes supported when the missing high-relevance chunk is available, but the relevant chunk was absent from the retrieved top-k results.
@@ -45,24 +45,27 @@ The answer becomes supported when the missing high-relevance chunk is available,
 Evidence:
   * Retriever returned low-relevance chunks at runtime (top score: 0.140).
   * Corpus audit shows indexed documents exist with high relevance to question.
-  * Corpus contains candidate 'chunk_incident_severity_p1' with distinct semantic relevance (score: 0.741).
+  * Corpus contains candidate 'chunk_incident_severity_p1' with distinct semantic relevance (score: 0.833, gap: 0.563) and high entity alignment (4/4 key terms matched).
+  * Root cause (suspected): Retriever failed to locate relevant documents present in the corpus.
 
 Recommended next step:
 Increase retrieval recall: inspect query reformulation, adjust embedding/indexing strategy, or expand candidate retrieval pool.
 
 Mode: corpus_aware
+Limitations:
+  * Candidate pool prior to top-k truncation was not logged in trace.
 ```
 
 ---
 
 ## 1. What Problem RAGmortem Solves
 
-When a RAG system returns an incorrect answer, traditional observability tools only compute continuous quality scores (e.g. faithfulness: 0.42). They do not tell you **which component broke**:
+When a RAG system returns an incorrect answer, traditional observability tools only compute continuous quality scores (e.g. `faithfulness: 0.42`). Continuous scores tell you *that* something went wrong, but never **which component broke**:
 - **Did the retriever fail to find the document?** (`retrieval_miss`)
-- **Did candidate retrieval find it, but ranking dropped it below top-k?** (`ranking_miss`)
-- **Did the generator receive the correct context, but ignore it or hallucinate?** (`generation_ignored_context`)
+- **Did the candidate retriever find it, but the re-ranker cut it below top-k?** (`ranking_miss`)
+- **Did the generator receive the correct context, but hallucinate or ignore it?** (`generation_ignored_context`)
 - **Was the question unanswerable from the knowledge base, but the model answered anyway?** (`should_abstain`)
-- **Is telemetry insufficient to distinguish the cause?** (`unknown`)
+- **Is runtime telemetry insufficient to distinguish the cause?** (`unknown`)
 
 RAGmortem replaces ambiguous scores with deterministic, reproducible root-cause attribution and concrete next-step remediation actions.
 
@@ -85,10 +88,14 @@ RAGmortem is built as a local-first developer debugging tool:
 RAGmortem uses an uncertainty-aware decision tree operating on observable execution telemetry:
 
 1. **Telemetry Completeness Check**: Validates that query, answer, context, and similarity scores are present. Missing telemetry directly produces `UNKNOWN` rather than fabricated certainty.
-2. **Abstention & Refusal Probe**: Detects whether the generator emitted a refusal. If low retrieval score matches refusal, marks `NO_FAILURE` (appropriate abstention). If context had strong scores, marks false refusal.
-3. **Candidate Cutoff Probe**: Inspects the candidate retrieval pool prior to top-k truncation. If a viable candidate exists immediately below the cutoff ($\text{score gap} \le 0.08$), isolates a `RANKING_SUSPECTED` failure.
-4. **Context Score Probe**: High similarity in context with an ungrounded or contradictory answer isolates `GENERATION_SUSPECTED`.
-5. **Corpus Audit vs. Trace-Only Boundary**:
+2. **Score Calibration Engine**: Normalizes score distributions across embedding spaces (`minilm`, `openai`, `bge`, or runtime empirical `relative` auto-calibration) to prevent threshold skew.
+3. **Abstention & Refusal Probe**: Detects whether the generator emitted a refusal. If low retrieval score matches refusal, marks `NO_FAILURE` (appropriate abstention). If context had strong scores, marks false refusal.
+4. **Candidate Cutoff Probe**: Inspects the candidate retrieval pool prior to top-k truncation. If a viable candidate exists immediately below the cutoff ($\text{score gap} \le 0.08$), isolates a `RANKING_SUSPECTED` failure.
+5. **Context Score & Grounding Probe**: High similarity in context with an ungrounded or contradictory answer isolates `GENERATION_SUSPECTED`.
+6. **Two-Tier Answer Verification Stack**:
+   - *Tier 1 (Default)*: Fast, deterministic token subsequence containment (CPU-only, zero dependencies).
+   - *Tier 2 (Semantic)*: Local NLI cross-encoder verification via `pip install "ragmortem[local-nli]"` for paraphrased and synonymous answers without external LLM judges.
+7. **Corpus Audit vs. Trace-Only Boundary**:
    - In `corpus_aware` mode, audits the corpus index to distinguish whether documents were missed (`RETRIEVAL_SUSPECTED`) or the question was unanswerable (`ABSTENTION_SUSPECTED`).
    - In `trace_only` mode, safely returns `UNKNOWN` because an APM trace without corpus access cannot infer document existence.
 
@@ -138,17 +145,17 @@ pip install -e ".[dev,local-nli]"
 Check version:
 ```bash
 ragmortem --version
-# or: python -m ragmortem --version
 ```
 
-Run the bundled demonstration on 5 synthetic failure cases with the screenshot-worthy Rich terminal UI:
+Run the bundled demonstration on 5 synthetic failure cases with the Rich terminal UI:
 ```bash
 ragmortem demo
-# or instant zero-install:
-uvx ragmortem demo
 
 # Switch embedding calibration profile (minilm, openai, bge, relative)
 ragmortem demo --profile relative
+
+# Export report directly to SVG for documentation or pull requests
+ragmortem demo --out docs/hero.svg
 ```
 
 View input trace schema with interactive Rich syntax highlighting:
@@ -156,28 +163,92 @@ View input trace schema with interactive Rich syntax highlighting:
 ragmortem schema
 ```
 
-Diagnose your own execution traces:
+Diagnose execution traces from the terminal:
 ```bash
-# Trace-only diagnosis with screenshot-worthy Rich terminal UI
-ragmortem diagnose trace.json
+# Trace-only diagnosis with Rich terminal UI
+ragmortem diagnose sample_failure.json
 
 # Calibrate to your embedding model distribution
 ragmortem diagnose trace.json --profile openai    # text-embedding-3-small/large
 ragmortem diagnose trace.json --profile bge       # bge-large-en-v1.5
 ragmortem diagnose trace.json --profile relative  # auto-calibrate to runtime score distribution
 
-# Corpus-aware diagnosis
+# Corpus-aware diagnosis (auditing markdown documents or index)
 ragmortem diagnose traces.jsonl --corpus path/to/documents
 
-# Export reports: HTML (dark-mode dashboard), structured JSON, or clean Markdown
+# Multi-format reporting: HTML (dark-mode dashboard), structured JSON, or clean Markdown
 ragmortem diagnose trace.json --format html --out report.html
-ragmortem diagnose trace.json --format json --out report.json
 ragmortem diagnose trace.json --format md --out report.md
+ragmortem diagnose trace.json --format json --out report.json
 ```
 
 ---
 
-## 5. Python SDK Usage
+## 5. Standard Input Trace Schema
+
+RAGmortem accepts traces as single JSON objects (`.json`), arrays of traces, or newline-delimited JSON (`.jsonl`).
+
+Run `ragmortem schema` to view the specification, or inspect the standard structure below:
+
+```json
+{
+  "id": "case_101",
+  "question": "What is the mandatory engineering response time for a P1 incident?",
+  "answer": "The response time for P1 incidents is 24 hours.",
+  "retrieved": [
+    {
+      "chunk_id": "chunk_p1_sla",
+      "text": "For Priority 1 (P1) critical incidents, the engineering response time SLA is 15 minutes.",
+      "score": 0.88
+    },
+    {
+      "chunk_id": "chunk_p2_sla",
+      "text": "For Priority 2 (P2) major incidents, the response time is 2 hours.",
+      "score": 0.52
+    }
+  ],
+  "candidates": [
+    {
+      "chunk_id": "chunk_p1_sla",
+      "text": "For Priority 1 (P1) critical incidents, the engineering response time SLA is 15 minutes.",
+      "score": 0.88
+    },
+    {
+      "chunk_id": "chunk_p2_sla",
+      "text": "For Priority 2 (P2) major incidents, the response time is 2 hours.",
+      "score": 0.52
+    },
+    {
+      "chunk_id": "chunk_p3_sla",
+      "text": "For Priority 3 (P3) minor incidents, the response time is 24 hours.",
+      "score": 0.35
+    }
+  ],
+  "top_k": 2,
+  "reference_answer": "15 minutes",
+  "score_type": "similarity"
+}
+```
+
+### Schema Field Reference
+
+| Field | Status | Type | Description |
+| :--- | :--- | :--- | :--- |
+| `id` | Optional | `string` | Unique trace or case identifier. |
+| `question` | **Required** | `string` | User query or question (alias: `query`). |
+| `answer` | **Required** | `string` | Answer produced by RAG pipeline (alias: `generated_answer`). |
+| `retrieved` | **Required** | `list[dict]` | Chunks injected into the LLM context (alias: `retrieved_chunks`). |
+| `retrieved[].chunk_id`| Optional | `string` | Unique chunk identifier (alias: `id`). |
+| `retrieved[].text` | Optional | `string` | Text content of chunk (alias: `content`). |
+| `retrieved[].score` | Optional | `float` | Relevance / similarity score. |
+| `candidates` | Optional | `list[dict]` | Full candidate pool before top-k truncation (same shape as `retrieved`). Enables candidate-cliff ranking diagnosis. |
+| `top_k` | Optional | `int` | Context window cutoff size. |
+| `reference_answer` | Optional | `string` | Expected ground-truth answer for definitive reference-assisted verification. |
+| `score_type` | Optional | `string` | `"similarity"` (default), `"cosine_distance"`, or `"distance"`. |
+
+---
+
+## 6. Python SDK Usage
 
 ### Trace Construction
 
@@ -202,7 +273,7 @@ Missing fields are never silently fabricated (missing scores, context, or answer
 
 ### Diagnostic Operating Modes
 
-RAGmortem supports two explicit **diagnostic scopes** (**never silently switches between them**):
+RAGmortem supports three explicit **diagnostic scopes** (**never silently switches between them**):
 
 | Scope | Mode Parameter | Corpus Required? | Reference Answer? | What It Verifies |
 |-------|----------------|------------------|-------------------|------------------|
@@ -232,7 +303,7 @@ result = diagnose(t, corpus="path/to/markdown/documents", mode="corpus_aware")
 from ragmortem import Chunk
 
 corpus = [
-    Chunk(id="doc_p1", text="P1 incidents require 15-minute response.", source="policy"),
+    Chunk(id="doc_p1", text="For P1 critical incidents, the response time SLA is 15 minutes.", source="policy"),
     Chunk(id="doc_dr", text="Disaster recovery drills occur quarterly.", source="policy"),
 ]
 result = diagnose(t, corpus=corpus, mode="corpus_aware")
@@ -250,7 +321,7 @@ result = diagnose(
     t,
     corpus=corpus,
     mode="corpus_aware",
-    reference_answer="P1 incidents require 15-minute response.",
+    reference_answer="15 minutes",
 )
 ```
 
@@ -268,7 +339,7 @@ python examples/integrations/realistic_rag_demo.py
 
 ---
 
-## 6. Hijack Existing Workflows (The Growth Wedge)
+## 7. Workflow Integrations (The Growth Wedge)
 
 ### 1-Line LangChain & LlamaIndex Callbacks
 
@@ -400,47 +471,6 @@ In **GitHub Actions**, `pytest-ragmortem` automatically:
 
 ---
 
-## 7. CLI: Diagnosing Saved Traces
-
-Diagnose saved JSON trace files from the terminal:
-
-```bash
-# Trace-only mode (offline APM logs, no corpus needed)
-ragmortem diagnose-trace trace.json
-
-# Corpus-aware mode (with a documents directory)
-ragmortem diagnose-trace trace.json --corpus path/to/documents
-
-# Structured JSON output
-ragmortem diagnose-trace trace.json --corpus path/to/documents --json
-```
-
-### Standard JSON Trace Schema
-
-```json
-{
-  "query": "What is the mandatory engineering response time for a P1 incident?",
-  "retrieved_chunks": [
-    {
-      "id": "chunk_dr_drill_frequency",
-      "text": "Disaster recovery drills occur quarterly.",
-      "score": 0.1407
-    }
-  ],
-  "scores": [0.1407],
-  "answer": "Engineers must execute drills quarterly.",
-  "context": "[1] Disaster recovery drills occur quarterly.",
-  "metadata": {
-    "model": "qwen-2.5",
-    "latency_ms": 320.5
-  }
-}
-```
-
----
-
----
-
 ## 8. Failure Taxonomy
 
 | Failure Mode | Canonical Type | What Happened | Recommended Next Step |
@@ -468,16 +498,16 @@ To ensure scientific credibility, RAGmortem distinguishes strictly between **con
 
 | Evaluation Suite / Benchmark | Purpose | Corpus-Aware Accuracy | Trace-Only Accuracy | Unknown Recall | Key Findings |
 | :--- | :--- | :---: | :---: | :---: | :--- |
+| **Real-World Public Dataset Benchmark** (50 traces) | External data validity (SQuAD v1.1) | 100.0% (reference-assisted) | — | 0.0% UNKNOWN | Traces built from real SQuAD v1.1 questions and Wikipedia passages, not project-generated fixtures. Top-k truncation accounted for 86.2% of genuine retrieval failures. |
 | **Day 5 Controlled In-Sample** (122 cases) | Development baseline | 100.0% (122/122) | N/A | N/A | Verified taxonomy and heuristic logic coherence under ideal conditions. |
 | **Day 6 Adversarial Holdout** (120 cases) | Cloud/DevOps holdout | 90.8% (109/120) | 58.3% (70/120) | 100.0% (20/20) | Exposed fixed-threshold brittleness; motivated uncertainty-aware scoring. |
 | **Day 7/8 BioTrial Frozen Holdout** (100 cases) | Clinical trials holdout | 100.0% (frozen upper-bound) / 96.0% overall | 60.0% (50.0% resolved, 100% precision) | 100.0% (20/20) | 100% recall on ranking misses and generation failures. Trace-only safely refuses low-score ambiguity. |
 | **Day 8 FinDebt Domain Holdout** (40 cases) | Complex corporate finance | 65.0% overall / 83.3% resolved | 7.5% (safely refuses) | 100.0% | Demonstrated that background terminology traps in specialized domains require lexical support analysis. |
 | **Integration Smoke Test** (`realistic_rag_demo.py`) | End-to-end integration | Smoke validation | Smoke validation | Smoke validation | Proves public API usability in real Python code without synthetic fault injection. |
-| **Real-World Public Dataset Benchmark** (50 traces) | External data validity | 100.0% (reference-assisted) | — | 0.0% UNKNOWN | Traces built from real SQuAD v1.1 questions and Wikipedia passages, not project-generated fixtures. See below. |
 
 ### 9.1 Real-World Benchmark Evidence (SQuAD v1.1)
 
-The benchmarks above use labels generated by RAGmortem's own fault injector. To test validity on **external, non-synthetic data**, `benchmarks/run_real_eval.py` builds failure traces from the public [SQuAD v1.1 development set](https://rajpurkar.github.io/SQuAD-explorer/) (Rajpurkar et al., 2016, CC BY-SA 4.0): real Wikipedia passages, human-written questions, and known ground-truth answers.
+The synthetic benchmarks above use labels generated by RAGmortem's own fault injector. To test validity on **external, non-synthetic data**, `benchmarks/run_real_eval.py` builds failure traces from the public [SQuAD v1.1 development set](https://rajpurkar.github.io/SQuAD-explorer/) (Rajpurkar et al., 2016, CC BY-SA 4.0): real Wikipedia passages, human-written questions, and known ground-truth answers.
 
 Each of the 50 traces replays a deterministic BM25 retrieval run over a 16-passage corpus, a top-8 → top-3 candidate re-ranking, and a generated answer (a decoy answer from the same dataset; no LLM was called). Results, full methodology, and threats to validity are in [`benchmarks/REAL_WORLD_RESULTS.md`](benchmarks/REAL_WORLD_RESULTS.md).
 
@@ -496,21 +526,20 @@ Headline findings (reproduce offline with `python benchmarks/run_real_eval.py`):
 | :--- | :--- | :--- |
 | **`trace_only`** | Operates strictly on provided runtime telemetry (query, retrieved chunks, scores, candidates, answer). Flags candidate truncation (`RANKING_SUSPECTED`), high-score context ignored (`GENERATION_SUSPECTED`), and appropriate refusal (`NO_FAILURE`). | Cannot verify whether unretrieved documents exist in your corpus or if the answer is factually correct. When retrieval scores are low or borderline, it safely refuses to guess and outputs `UNKNOWN`. |
 | **`corpus_aware`** | Audits your corpus index to determine if high-relevance documents exist for the query. Distinguishes retrieval misses (`RETRIEVAL_SUSPECTED`) from unanswerable queries (`ABSTENTION_SUSPECTED`), including terminology trap detection. | Cannot verify factual correctness of the generated answer without an expected reference answer. Diagnoses retrieval quality and grounding alignment, not semantic truth. |
-| **`reference_assisted`** | Verifies lexical correctness against a user-supplied reference answer. Determines if evidence was present in context (`GENERATION_PROVEN`), candidate pool (`RANKING_MISS`), broader corpus (`RETRIEVAL_MISS`), or absent (`SHOULD_ABSTAIN`). | Reference matching is purely lexical, not semantic. Paraphrased or synonymous answers may not match. `GENERATION_PROVEN` means lexical containment evidence, not mathematical proof of reasoning. |
+| **`reference_assisted`** | Verifies correctness against a user-supplied reference answer using two-tier verification (lexical + local NLI). Determines if evidence was present in context (`GENERATION_PROVEN`), candidate pool (`RANKING_MISS`), broader corpus (`RETRIEVAL_MISS`), or absent (`SHOULD_ABSTAIN`). | Reference matching verifies alignment against the reference, not mathematical proof of reasoning. Paraphrased answers without `[local-nli]` installed rely on token subsequence matching. |
 | **`oracle`** | Runs counterfactual replay isolating retriever vs. generator ceilings in controlled research benchmarks. | Cannot run on uncurated production traces without a known ground-truth gold chunk. |
 
 ---
 
 ## 11. Known Limitations
 
-* **Embedding Distribution Calibration**: RAGmortem includes distribution-aware auto-calibration (`ScoreCalibrator`) supporting OpenAI (`text-embedding-3-small/large`), Cohere (`embed-v3`), BGE (`bge-large-en-v1.5`), and MiniLM baselines. When evaluating unknown embedding distributions, empirical distribution calibration automatically analyzes observed candidate pools (mean, spread, z-scores) rather than relying exclusively on fixed thresholds.
-* **Semantic Verification vs. Token Matching**: Answer verification defaults to fast deterministic token matching and seamlessly upgrades to local NLI / Cross-Encoder entailment verification when installed via `pip install ragmortem[local-nli]`, enabling robust semantic verification for paraphrased responses.
+* **Embedding Distribution Calibration**: RAGmortem includes distribution-aware auto-calibration (`ScoreCalibrator`) supporting OpenAI (`text-embedding-3-small/large`), Cohere (`embed-v3`), BGE (`bge-large-en-v1.5`), and MiniLM baselines. When evaluating unknown embedding distributions, empirical distribution calibration (`--profile relative`) automatically analyzes observed candidate pools (mean, spread, z-scores) rather than relying exclusively on fixed thresholds.
+* **Semantic Verification vs. Token Matching**: Answer verification defaults to fast deterministic token matching and seamlessly upgrades to local NLI / Cross-Encoder entailment verification when installed via `pip install "ragmortem[local-nli]"`, enabling robust semantic verification for paraphrased responses.
 * **`GENERATION_PROVEN` Means Lexical Evidence, Not Proof**: The enum label `GENERATION_PROVEN` denotes that the reference answer text was verbatim contained within the retrieved context chunks, yet the generator failed to produce it. It does not represent formal mathematical or logical proof.
 * **Counterfactual Replay Requires Gold Chunk**: Counterfactual replay only runs in `oracle` mode, which strictly requires a verified `gold_chunk_id`.
 * **Synthetic Benchmark Labels in `evals/`**: Labels in the project's `evals/` datasets were generated by the project's own fault injector, so they share its assumptions. For validity on external data, see the [Real-World Benchmark Evidence](#91-real-world-benchmark-evidence-squad-v11) built on the public SQuAD v1.1 dataset (`benchmarks/`). No real-world **production outage** traces from a third-party deployment have been evaluated yet; the SQuAD traces use simulated decoy answers rather than recorded LLM outputs. See [docs/EVIDENCE.md](docs/EVIDENCE.md) for full provenance and tuning history.
 * **Single-Hop Factual Focus**: Optimized for single-chunk answerable lookups. Multi-hop reasoning across disjoint documents remains active research.
 * **Uncalibrated Confidence**: `evidence_score` represents relative deterministic heuristic strength, not a calibrated Bayesian probability.
-
 
 ---
 
@@ -526,7 +555,16 @@ All 192 tests run 100% offline on CPU in ~10 seconds without network requests or
 
 ---
 
-## 13. License
+## 13. Help Us Validate on Production Data
+
+Are you experiencing mysterious wrong answers, hallucinations, or silent retrieval failures in your production RAG application?
+
+Help us validate RAGmortem against real-world production data. In return, receive a free, detailed forensic root-cause analysis of your pipeline failures.
+
+See the [Failure Intake Kit (`docs/SEND_ME_FAILURES.md`)](docs/SEND_ME_FAILURES.md) for submission instructions, data scrubbing checklists, and redaction guidelines.
+
+---
+
+## 14. License
 
 Apache-2.0 License. See [LICENSE](LICENSE) for details.
-
